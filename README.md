@@ -95,12 +95,29 @@ duplicate repos are rejected, `repos`/`contributors` must be non-empty,
 `vaultContract` is required, `network` must be `testnet`|`mainnet`, and unknown
 top-level keys are rejected so typos like `vaultContractt` cannot pass silently.
 
-### Points labels
+### Points labels — canonical convention (org-wide)
 
-Closed issues carry exactly one of `points:100`, `points:150`, `points:200`
-(trimmed, case-insensitive — the single normalization point lives in
-[`src/points.ts`](src/points.ts)). If a repo historically uses different label
-names, normalize them there, in one place.
+**`points:100`, `points:150`, `points:200` are the only valid points labels in
+any repo under the org.** Every issue that awards points is created with exactly
+one of these three names — no other naming scheme exists, so there is never a
+second vocabulary to reconcile. The single normalization point lives in
+[`src/points.ts`](src/points.ts) (`POINTS_BY_LABEL`): labels are matched
+trimmed and case-insensitive, and a repo should never need its own mapping.
+
+Pin the label colors org-wide so the convention is recognizable everywhere:
+
+| Label | Color |
+|---|---|
+| `points:100` | `0E8A16` (green) |
+| `points:150` | `FBCA04` (yellow) |
+| `points:200` | `D93F0B` (red) |
+
+Labels without the `points:` prefix (e.g. `100pts`) are **not** recognized and
+must never be created on new issues — a contributor closing an issue that
+carries one would be silently treated as unlabeled. On 2026-09-09 the
+splitstream-core backlog was aligned to this convention by defining these
+labels; if a points label with any other name is ever found in the org, rename
+it to the canonical form in the same commit that creates the issue.
 
 ## Action inputs & outputs
 
