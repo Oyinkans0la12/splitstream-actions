@@ -103140,6 +103140,8 @@ function attributePoints(contributions, registry) {
 
 ;// CONCATENATED MODULE: ./src/manifest.ts
 
+
+
 /**
  * Points -> payout computation. The formula is FROZEN (shared contract with
  * splitstream-core and splitstream-sdk-cli):
@@ -103191,6 +103193,66 @@ function computePayouts(pointsByGithub, registry, poolAmount) {
         totalDistributed: totalDistributed.toString(),
         dustRemainder: dustRemainder.toString(),
     };
+}
+/**
+ * Finds the last posted cycle from this repo's committed audit trail
+ * (`manifests/cycle-<id>.json`), which is the source of truth for the next
+ * cycle's window — the deployed contract cannot enumerate cycles.
+ *
+ * Returns `null` when no manifest exists yet (cycle 0 — the caller falls back
+ * to the `since`/`cycle_id` workflow inputs). Throws on a corrupt audit trail
+ * (unreadable directory, malformed JSON, missing `generatedAt`, or a filename
+ * whose `<id>` disagrees with the manifest's `cycleId`) — never guesses.
+ */
+function readLastManifestWindow(manifestDir) {
+    let entries;
+    try {
+        entries = (0,external_node_fs_namespaceObject.readdirSync)(manifestDir, { withFileTypes: true });
+    }
+    catch (err) {
+        if (err.code === 'ENOENT') {
+            return null; // no audit trail yet — this is cycle 0
+        }
+        throw new ManifestError(`cannot read manifest directory '${manifestDir}': ${describeError(err)}`, { cause: err });
+    }
+    // cycle-<id>.json only — dry-run artifacts (cycle-<id>.dry-run.json) never count.
+    const ids = entries
+        .filter((entry) => entry.isFile())
+        .map((entry) => /^cycle-(\d+)\.json$/.exec(entry.name))
+        .filter((match) => match !== null)
+        .map((match) => Number(match[1]))
+        .filter((id) => Number.isSafeInteger(id));
+    if (ids.length === 0)
+        return null;
+    const lastCycleId = Math.max(...ids);
+    const path = (0,external_node_path_namespaceObject.join)(manifestDir, `cycle-${lastCycleId}.json`);
+    let raw;
+    try {
+        raw = (0,external_node_fs_namespaceObject.readFileSync)(path, 'utf8');
+    }
+    catch (err) {
+        throw new ManifestError(`cannot read committed manifest '${path}': ${describeError(err)}`, {
+            cause: err,
+        });
+    }
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    }
+    catch (err) {
+        throw new ManifestError(`committed manifest '${path}' is not valid JSON: ${describeError(err)}`, {
+            cause: err,
+        });
+    }
+    const cycleId = parsed.cycleId;
+    if (cycleId !== lastCycleId) {
+        throw new ManifestError(`committed manifest '${path}' has cycleId=${cycleId}; filename and content disagree`);
+    }
+    const generatedAt = parsed.generatedAt;
+    if (typeof generatedAt !== 'string' || Number.isNaN(Date.parse(generatedAt))) {
+        throw new ManifestError(`committed manifest '${path}' is missing a valid generatedAt timestamp`);
+    }
+    return { cycleId: lastCycleId, generatedAt };
 }
 function buildManifest(opts) {
     return {
@@ -103329,20 +103391,26 @@ var api = __nccwpck_require__(2361);
 
 /**
  * Soroban RPC layer — the single integration point with the deployed
- * splitstream-core contract. The contract interface assumed here:
+ * splitstream-core contract. The contract interface (verified against
+ * splitstream-core's source, which is immutable at its deployed contract id):
  *
- *   get_cycle_info() -> Option<CycleInfo>          // latest posted cycle
- *     where CycleInfo is a #[contracttype] record serialized as an ScVal vec:
- *       [ cycle_id: u32, start_ledger: u32, end_ledger: u32, root: Bytes(32), total_amount: i128 ]
+ *   get_cycle_info(cycle_id: u64) -> Option<CycleInfo>
+ *     where CycleInfo is a #[contracttype] record serialized as an ScVal map
+ *     keyed by field-name symbols:
+ *       { root: Bytes(32), total_amount: i128, posted_at: u64,
+ *         claims_started: bool, replaced: bool }
  *     and None is ScVal void. Adjust `parseCycleInfo` here if the contract's
- *     field types/order differ — this is the one place to look.
+ *     shape ever differs — this is the one place to look.
  *
- *   post_cycle_root(cycle_id: u32, root: Bytes(32), total_amount: i128)
+ *   post_cycle_root(cycle_id: u64, root: Bytes(32), total_amount: i128)
  *
- * The window for the next cycle starts at the close time of the previous
- * cycle's `end_ledger` (via RPC getLedgers). Failure modes are loud: a failed
- * submission, an unconfirmed transaction, or an unparseable contract reply all
- * throw RelayError — never "submitted" treated as "succeeded".
+ * The contract CANNOT enumerate posted cycles (there is no "latest cycle"
+ * call), so the window for the next cycle is derived from this repo's own
+ * committed audit trail (manifests/cycle-<id>.json) — see
+ * `readLastManifestWindow` in manifest.ts. get_cycle_info(cycle_id) is used
+ * only as a sanity check against that manifest. Failure modes are loud: a
+ * failed submission, an unconfirmed transaction, or an unparseable contract
+ * reply all throw RelayError — never "submitted" treated as "succeeded".
  */
 class RelayError extends Error {
     constructor(message, options) {
@@ -103350,57 +103418,93 @@ class RelayError extends Error {
         this.name = 'RelayError';
     }
 }
-function scvU32(value) {
-    if (!Number.isInteger(value) || value < 0 || value > 0xffffffff) {
-        throw new RelayError(`invalid u32 value: ${value}`);
+function scvU64(value) {
+    let asBigInt;
+    if (typeof value === 'bigint') {
+        asBigInt = value;
     }
-    return sc_val/* ScVal */.wq.scvU32(value);
-}
-function parseU32OrI128(scVal) {
-    switch (scVal.type) {
-        case 'scvU32':
-            return scVal.u32;
-        case 'scvI128': {
-            const value = (0,numbers/* scValToBigInt */.O)(scVal);
-            if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
-                throw new RelayError(`contract returned a value too large for a safe JS integer: ${value}`);
-            }
-            return Number(value);
-        }
-        default:
-            throw new RelayError(`unexpected ScVal type '${scVal.type}' where scvU32|scvI128 was expected`);
+    else if (Number.isSafeInteger(value) && value >= 0) {
+        asBigInt = BigInt(value);
     }
+    else {
+        throw new RelayError(`invalid u64 value: ${value}`);
+    }
+    if (asBigInt > BigInt(Number.MAX_SAFE_INTEGER)) {
+        throw new RelayError(`invalid u64 value: ${value}`);
+    }
+    return sc_val/* ScVal */.wq.scvU64(asBigInt);
 }
 /**
- * Parses `get_cycle_info`'s return value. Returns `null` when there is no
- * previous cycle (ScVal void / missing result). Throws on anything else —
- * an unparseable contract reply must never be guessed at.
+ * Parses `get_cycle_info`'s return value. Returns `null` when the contract
+ * has no record for the queried cycle (ScVal void / missing result). Throws on
+ * anything else — an unparseable contract reply must never be guessed at.
+ *
+ * CycleInfo is a `#[contracttype]` struct, which soroban-sdk serializes as an
+ * ScVal map keyed by field-name symbols (root, total_amount, posted_at,
+ * claims_started, replaced); `Option<CycleInfo>` is Void for None and the map
+ * itself for Some. Lookup is by key, so map entry order does not matter.
  */
 function parseCycleInfo(retval) {
     if (retval === undefined || retval === null || retval.type === 'scvVoid')
         return null;
-    if (retval.type !== 'scvVec') {
-        throw new RelayError(`unexpected get_cycle_info return type: '${retval.type}'`);
+    if (retval.type !== 'scvMap') {
+        throw new RelayError(`unexpected get_cycle_info return type: '${retval.type}' (expected scvMap or scvVoid)`);
     }
-    const fields = retval.vec;
-    if (fields === null) {
-        throw new RelayError('get_cycle_info returned an empty vec');
+    const entries = retval.map;
+    if (entries === null || entries === undefined || entries.length === 0) {
+        throw new RelayError('get_cycle_info returned an empty map');
     }
-    if (fields.length < 3) {
-        throw new RelayError(`get_cycle_info returned ${fields.length} field(s); expected at least 3 (cycle_id, start_ledger, end_ledger, ...)`);
+    const byKey = new Map();
+    for (const entry of entries) {
+        if (entry.key.type !== 'scvSymbol') {
+            throw new RelayError(`get_cycle_info returned a map entry with a non-symbol key ('${entry.key.type}')`);
+        }
+        byKey.set(entry.key.sym.toString(), entry.val);
+    }
+    const root = byKey.get('root');
+    const totalAmount = byKey.get('total_amount');
+    const postedAt = byKey.get('posted_at');
+    const claimsStarted = byKey.get('claims_started');
+    const replaced = byKey.get('replaced');
+    if (root === undefined ||
+        totalAmount === undefined ||
+        postedAt === undefined ||
+        claimsStarted === undefined ||
+        replaced === undefined) {
+        throw new RelayError(`get_cycle_info returned a map missing required fields (found: ${[...byKey.keys()].join(', ') || 'none'})`);
+    }
+    if (root.type !== 'scvBytes' || root.bytes.value.length !== 32) {
+        throw new RelayError(`get_cycle_info root must be a 32-byte Bytes value, got '${root.type}'` +
+            (root.type === 'scvBytes' ? ` (${root.bytes.value.length} bytes)` : ''));
+    }
+    if (totalAmount.type !== 'scvI128') {
+        throw new RelayError(`get_cycle_info total_amount must be an i128, got '${totalAmount.type}'`);
+    }
+    if (postedAt.type !== 'scvU64') {
+        throw new RelayError(`get_cycle_info posted_at must be a u64, got '${postedAt.type}'`);
+    }
+    const postedAtValue = postedAt.u64;
+    if (postedAtValue > BigInt(Number.MAX_SAFE_INTEGER)) {
+        throw new RelayError(`get_cycle_info posted_at is too large for a safe JS integer: ${postedAtValue}`);
+    }
+    if (claimsStarted.type !== 'scvBool' || replaced.type !== 'scvBool') {
+        throw new RelayError(`get_cycle_info claims_started/replaced must be booleans, got '${claimsStarted.type}'/'${replaced.type}'`);
     }
     return {
-        cycleId: parseU32OrI128(fields[0]),
-        startLedger: parseU32OrI128(fields[1]),
-        endLedger: parseU32OrI128(fields[2]),
+        root: Buffer.from(root.bytes.value),
+        totalAmount: (0,numbers/* scValToBigInt */.O)(totalAmount),
+        postedAt: Number(postedAtValue),
+        claimsStarted: claimsStarted.b,
+        replaced: replaced.b,
     };
 }
 /**
- * Reads the latest posted cycle from splitstream-core. Returns `null` when no
- * cycle has been posted yet (cycle 0). Throws on RPC/auth errors — we never
- * silently fall back to an input window when the chain is simply unreachable.
+ * Reads one cycle's info from splitstream-core by id (the contract cannot
+ * enumerate cycles — the caller supplies the id). Returns `null` when the
+ * contract has no record for that cycle. Throws on RPC/auth errors — we never
+ * guess when the chain is unreachable.
  */
-async function queryLatestCycle(server, vault, sourcePubkey, networkPassphrase) {
+async function queryCycleInfo(server, vault, sourcePubkey, networkPassphrase, cycleId) {
     let account;
     try {
         account = await server.getAccount(sourcePubkey);
@@ -103409,7 +103513,7 @@ async function queryLatestCycle(server, vault, sourcePubkey, networkPassphrase) 
         throw new RelayError(`cannot load relay account ${sourcePubkey} from Soroban RPC: ${describeRelayError(err)}`, { cause: err });
     }
     const tx = new transaction_builder/* TransactionBuilder */.Qc(account, { fee: transaction_builder/* BASE_FEE */.hJ, networkPassphrase })
-        .addOperation(vault.call('get_cycle_info'))
+        .addOperation(vault.call('get_cycle_info', scvU64(cycleId)))
         .setTimeout(transaction_builder/* TimeoutInfinite */.KU)
         .build();
     let simulation;
@@ -103466,7 +103570,7 @@ async function relayCycleRoot(opts) {
         throw new RelayError(`cannot load relay account ${keypair.publicKey()} from Soroban RPC (is it funded?): ${describeRelayError(err)}`, { cause: err });
     }
     const tx = new transaction_builder/* TransactionBuilder */.Qc(account, { fee: transaction_builder/* BASE_FEE */.hJ, networkPassphrase })
-        .addOperation(vault.call('post_cycle_root', scvU32(cycleId), (0,scval/* nativeToScVal */.o5)(root), scvI128(totalAmount)))
+        .addOperation(vault.call('post_cycle_root', scvU64(cycleId), (0,scval/* nativeToScVal */.o5)(root), scvI128(totalAmount)))
         .setTimeout(transaction_builder/* TimeoutInfinite */.KU)
         .build();
     let prepared;
@@ -103525,8 +103629,9 @@ function describeRelayError(err) {
 /**
  * Orchestrator:
  *   1. Validate inputs + contributor registry (fail loudly on any malformed entry).
- *   2. Determine the cycle window — the close time of the previous on-chain
- *      cycle's end ledger, or the `since` input for cycle 0 / dry runs.
+ *   2. Determine the cycle window — the last committed manifest's `generatedAt`
+ *      (this repo's audit trail, the source of truth), or the `since` input for
+ *      cycle 0 / dry runs. get_cycle_info is used only as a sanity check.
  *   3. Crawl merged PRs across every repo in the registry, resolve closing
  *      issues, attribute points to PR authors (summed across repos).
  *   4. Compute payouts (floor formula), dust remainder, Merkle root.
@@ -103600,23 +103705,49 @@ async function main() {
     }
     else {
         const rpcUrl = rpcUrlInput || defaultRpcUrl(registry.network);
-        info(`querying splitstream-core (${registry.vaultContract}) for the last posted cycle via ${rpcUrl}`);
         const server = new rpc_server/* RpcServer */.vO(rpcUrl);
         const vault = new contract/* Contract */.N(registry.vaultContract);
         const keypair = base_keypair/* Keypair */.A.fromSecret(oracleSecret);
-        const lastCycle = await queryLatestCycle(server, vault, keypair.publicKey(), networkPassphrase(registry.network));
-        if (lastCycle !== null) {
-            cycleId = lastCycle.cycleId + 1;
-            sinceIso = await ledgerCloseTime(server, lastCycle.endLedger);
-            info(`last posted cycle: #${lastCycle.cycleId} (start ledger ${lastCycle.startLedger}, end ledger ${lastCycle.endLedger}); ` +
+        const manifestWindow = readLastManifestWindow(manifestDir);
+        if (manifestWindow !== null) {
+            // The committed audit trail is the source of truth: the contract has no
+            // "latest cycle" call, so chain state cannot define the window.
+            cycleId = manifestWindow.cycleId + 1;
+            sinceIso = manifestWindow.generatedAt;
+            info(`last committed cycle manifest: #${manifestWindow.cycleId} (generated ${sinceIso}); ` +
                 `new cycle #${cycleId} window starts ${sinceIso}`);
+            // Sanity check ONLY — never the primary source of truth. The relay for
+            // the manifest's cycle should have landed with a matching posted_at.
+            try {
+                const onChain = await queryCycleInfo(server, vault, keypair.publicKey(), networkPassphrase(registry.network), manifestWindow.cycleId);
+                if (onChain === null) {
+                    core_warning(`sanity check: get_cycle_info(${manifestWindow.cycleId}) returned no cycle on-chain even though ` +
+                        `cycle-${manifestWindow.cycleId}.json is committed — that cycle's relay may never have landed; ` +
+                        `proceeding with the committed manifest window`);
+                }
+                else {
+                    const postedIso = new Date(onChain.postedAt * 1000).toISOString();
+                    const driftSecs = Math.abs(onChain.postedAt - Date.parse(sinceIso) / 1000);
+                    if (driftSecs > 3600) {
+                        core_warning(`sanity check: on-chain posted_at (${postedIso}) differs from the committed manifest's ` +
+                            `generatedAt (${sinceIso}) by ${Math.round(driftSecs / 60)} min; using the committed manifest timestamp`);
+                    }
+                    else {
+                        info(`sanity check OK: get_cycle_info(${manifestWindow.cycleId}) posted_at ${postedIso} matches the committed manifest`);
+                    }
+                }
+            }
+            catch (err) {
+                core_warning(`sanity check skipped — could not read get_cycle_info(${manifestWindow.cycleId}) via ${rpcUrl}: ` +
+                    `${describeError(err)}; proceeding with the committed manifest window`);
+            }
         }
         else {
-            core_warning('splitstream-core reports no previous cycle; falling back to `since`/`cycle_id` inputs (cycle 0)');
+            core_warning(`no committed cycle manifest found in '${manifestDir}'; falling back to \`since\`/\`cycle_id\` inputs (cycle 0)`);
             if (sinceInput === '')
-                throw new ActionError('`since` input is required when no previous cycle exists on-chain');
+                throw new ActionError('`since` input is required when no previous cycle manifest exists');
             if (cycleIdInput === '')
-                throw new ActionError('`cycle_id` input is required when no previous cycle exists on-chain');
+                throw new ActionError('`cycle_id` input is required when no previous cycle manifest exists');
             sinceIso = parseSince(sinceInput);
             cycleId = parseCycleId(cycleIdInput);
         }

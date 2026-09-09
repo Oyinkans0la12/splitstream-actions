@@ -11,15 +11,16 @@ import {
 } from './registry.js';
 import { ingestCycle } from './ingest.js';
 import { attributePoints } from './points.js';
-import { buildManifest, computePayouts } from './manifest.js';
+import { buildManifest, computePayouts, readLastManifestWindow } from './manifest.js';
 import { buildMerkleRoot } from './merkle.js';
-import { ledgerCloseTime, queryLatestCycle, relayCycleRoot } from './relay.js';
+import { queryCycleInfo, relayCycleRoot } from './relay.js';
 
 /**
  * Orchestrator:
  *   1. Validate inputs + contributor registry (fail loudly on any malformed entry).
- *   2. Determine the cycle window — the close time of the previous on-chain
- *      cycle's end ledger, or the `since` input for cycle 0 / dry runs.
+ *   2. Determine the cycle window — the last committed manifest's `generatedAt`
+ *      (this repo's audit trail, the source of truth), or the `since` input for
+ *      cycle 0 / dry runs. get_cycle_info is used only as a sanity check.
  *   3. Crawl merged PRs across every repo in the registry, resolve closing
  *      issues, attribute points to PR authors (summed across repos).
  *   4. Compute payouts (floor formula), dust remainder, Merkle root.
@@ -101,23 +102,63 @@ async function main(): Promise<void> {
     core.info(`dry-run: cycle #${cycleId}, window since ${sinceIso} (no on-chain queries)`);
   } else {
     const rpcUrl = rpcUrlInput || defaultRpcUrl(registry.network);
-    core.info(`querying splitstream-core (${registry.vaultContract}) for the last posted cycle via ${rpcUrl}`);
     const server = new rpc.Server(rpcUrl);
     const vault = new Contract(registry.vaultContract);
     const keypair = Keypair.fromSecret(oracleSecret!);
 
-    const lastCycle = await queryLatestCycle(server, vault, keypair.publicKey(), networkPassphrase(registry.network));
-    if (lastCycle !== null) {
-      cycleId = lastCycle.cycleId + 1;
-      sinceIso = await ledgerCloseTime(server, lastCycle.endLedger);
+    const manifestWindow = readLastManifestWindow(manifestDir);
+    if (manifestWindow !== null) {
+      // The committed audit trail is the source of truth: the contract has no
+      // "latest cycle" call, so chain state cannot define the window.
+      cycleId = manifestWindow.cycleId + 1;
+      sinceIso = manifestWindow.generatedAt;
       core.info(
-        `last posted cycle: #${lastCycle.cycleId} (start ledger ${lastCycle.startLedger}, end ledger ${lastCycle.endLedger}); ` +
+        `last committed cycle manifest: #${manifestWindow.cycleId} (generated ${sinceIso}); ` +
           `new cycle #${cycleId} window starts ${sinceIso}`,
       );
+
+      // Sanity check ONLY — never the primary source of truth. The relay for
+      // the manifest's cycle should have landed with a matching posted_at.
+      try {
+        const onChain = await queryCycleInfo(
+          server,
+          vault,
+          keypair.publicKey(),
+          networkPassphrase(registry.network),
+          manifestWindow.cycleId,
+        );
+        if (onChain === null) {
+          core.warning(
+            `sanity check: get_cycle_info(${manifestWindow.cycleId}) returned no cycle on-chain even though ` +
+              `cycle-${manifestWindow.cycleId}.json is committed — that cycle's relay may never have landed; ` +
+              `proceeding with the committed manifest window`,
+          );
+        } else {
+          const postedIso = new Date(onChain.postedAt * 1000).toISOString();
+          const driftSecs = Math.abs(onChain.postedAt - Date.parse(sinceIso) / 1000);
+          if (driftSecs > 3600) {
+            core.warning(
+              `sanity check: on-chain posted_at (${postedIso}) differs from the committed manifest's ` +
+                `generatedAt (${sinceIso}) by ${Math.round(driftSecs / 60)} min; using the committed manifest timestamp`,
+            );
+          } else {
+            core.info(
+              `sanity check OK: get_cycle_info(${manifestWindow.cycleId}) posted_at ${postedIso} matches the committed manifest`,
+            );
+          }
+        }
+      } catch (err) {
+        core.warning(
+          `sanity check skipped — could not read get_cycle_info(${manifestWindow.cycleId}) via ${rpcUrl}: ` +
+            `${describeError(err)}; proceeding with the committed manifest window`,
+        );
+      }
     } else {
-      core.warning('splitstream-core reports no previous cycle; falling back to `since`/`cycle_id` inputs (cycle 0)');
-      if (sinceInput === '') throw new ActionError('`since` input is required when no previous cycle exists on-chain');
-      if (cycleIdInput === '') throw new ActionError('`cycle_id` input is required when no previous cycle exists on-chain');
+      core.warning(
+        `no committed cycle manifest found in '${manifestDir}'; falling back to \`since\`/\`cycle_id\` inputs (cycle 0)`,
+      );
+      if (sinceInput === '') throw new ActionError('`since` input is required when no previous cycle manifest exists');
+      if (cycleIdInput === '') throw new ActionError('`cycle_id` input is required when no previous cycle manifest exists');
       sinceIso = parseSince(sinceInput);
       cycleId = parseCycleId(cycleIdInput);
     }

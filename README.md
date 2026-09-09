@@ -20,7 +20,7 @@ splitstream-core contract via Soroban RPC.
 ```
 splitstream.yml (registry) ──┐
 cycle_pool_amount (input) ───┤
-since / on-chain last cycle ─┼─► ingest (Octokit) ─► points ─► manifest ─► merkle ─► relay (Soroban RPC)
+since / last committed manifest ─┼─► ingest (Octokit) ─► points ─► manifest ─► merkle ─► relay (Soroban RPC)
 GITHUB_TOKEN / ORACLE_SECRET ┘                                                     └─► manifests/cycle-<id>.json
 ```
 
@@ -28,10 +28,13 @@ GITHUB_TOKEN / ORACLE_SECRET ┘                                                
    malformed strkey, duplicate handle, empty repo list, or missing
    `vaultContract` fails the run loudly (`core.setFailed`, non-zero exit).
    Nothing is ever silently skipped.
-2. **Cycle window** — for cycles after 0, the window starts at the close time of
-   the previous on-chain cycle's `end_ledger` (queried via
-   `splitstream-core.get_cycle_info`). For cycle 0 and dry runs, the `since`
-   input supplies the boundary. One shared window for the whole org.
+2. **Cycle window** — the window for cycle *N* starts at the `generatedAt` of
+   the last committed manifest, `manifests/cycle-(N-1).json`, this repo's own
+   audit trail. The deployed contract has no "latest cycle" call and is never
+   queried for the boundary; `get_cycle_info(cycle_id)` is called only as a
+   sanity check that the committed manifest's cycle actually landed on-chain.
+   For cycle 0 (no committed manifest) and dry runs, the `since` input supplies
+   the boundary. One shared window for the whole org.
 3. **Ingest** — for every repo in the registry, crawls merged PRs inside the
    window, matches GitHub closing keywords (`Closes/Fixes/Resolves #N`) in PR
    bodies, and loads the linked issues (always resolved as
@@ -106,8 +109,8 @@ See [`action.yml`](action.yml) for the full reference. Key inputs:
 | Input | Required | Meaning |
 |---|---|---|
 | `cycle_pool_amount` | yes | Pool to distribute, in stroops (string). Set per cycle — never inferred. |
-| `cycle_id` | cycle 0 / dry runs | Cycle id for the manifest and relay; otherwise inferred on-chain. |
-| `since` | cycle 0 / dry runs | Cycle start boundary (ISO 8601). |
+| `cycle_id` | cycle 0 / dry runs | Cycle id for the manifest and relay; otherwise inferred from the committed `manifests/` audit trail (last cycle + 1). |
+| `since` | cycle 0 / dry runs | Cycle start boundary (ISO 8601); otherwise taken from the last committed manifest's `generatedAt`. |
 | `dry_run` | no | Compute manifest + Merkle root only; skip queries and relay. |
 | `config_path` | no | Path to the registry (default `.github/splitstream.yml`). |
 | `rpc_url` | no | Soroban RPC override; defaults from `network`. |
@@ -132,7 +135,8 @@ runs the action weekly (`schedule`) or via `workflow_dispatch`. For schedule run
 per-cycle configuration comes from repo variables:
 
 - `CYCLE_POOL_AMOUNT` — required; the pool for that week's cycle, in stroops.
-- `CYCLE_ID` — only needed for cycle 0; subsequent ids come from on-chain state.
+- `CYCLE_ID` — only needed for cycle 0; subsequent ids come from the committed
+  `manifests/` audit trail (last committed cycle + 1).
 
 The workflow commits the generated manifest (`manifests/cycle-<id>.json`) as the
 audit trail and pushes it — the on-chain root must always be reproducible from
@@ -190,10 +194,13 @@ fixture against splitstream-core's Rust test suite.
 The one integration point with the deployed contract, isolated in
 [`src/relay.ts`](src/relay.ts):
 
-- `get_cycle_info() -> Option<CycleInfo>` — latest posted cycle, encoded as an
-  ScVal vec `[cycle_id, start_ledger, end_ledger, root, total_amount]`
-  (`cycle_id`/ledgers as u32 or i128); `None` when no cycle exists.
-- `post_cycle_root(cycle_id: u32, root: Bytes(32), total_amount: i128)`
+- `get_cycle_info(cycle_id: u64) -> Option<CycleInfo>` — one cycle's info,
+  keyed by the id the caller supplies (the contract cannot enumerate cycles);
+  `None` (ScVal void) when that cycle has no record. `CycleInfo` is a
+  `#[contracttype]` record serialized as an ScVal map keyed by field-name
+  symbols: `{ root: Bytes(32), total_amount: i128, posted_at: u64,
+  claims_started: bool, replaced: bool }`.
+- `post_cycle_root(cycle_id: u64, root: Bytes(32), total_amount: i128)`
 
 If the deployed contract's field types/order differ, adjust `parseCycleInfo`
 there — it is the only place that decodes the reply, and it throws rather than

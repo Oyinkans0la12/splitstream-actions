@@ -4,8 +4,8 @@ on:
   schedule:
     # Weekly Wave sprint boundary — adjust to your org's sprint day.
     # Monday 00:00 UTC. Per-cycle config comes from repo variables
-    # (CYCLE_POOL_AMOUNT, CYCLE_ID for cycle 0); the on-chain state supplies
-    # the window for every cycle after 0.
+    # (CYCLE_POOL_AMOUNT, CYCLE_ID for cycle 0); the committed manifests/
+    # audit trail supplies the window for every cycle after 0.
     - cron: "0 0 * * 1"
   workflow_dispatch:
     inputs:
@@ -13,10 +13,10 @@ on:
         description: "Cycle pool in stroops (string). Ignored on schedule — the schedule uses the CYCLE_POOL_AMOUNT repo variable."
         required: false
       cycle_id:
-        description: "Cycle id (string). Required for cycle 0 and dry runs; inferred from on-chain state otherwise."
+        description: "Cycle id (string). Required for cycle 0 and dry runs; inferred from the committed manifests/ audit trail otherwise."
         required: false
       since:
-        description: "Cycle start boundary (ISO 8601). Required for cycle 0 and dry runs."
+        description: "Cycle start boundary (ISO 8601). Required for cycle 0 and dry runs; otherwise taken from the last committed manifest's generatedAt."
         required: false
       dry_run:
         description: "Compute manifest + Merkle root only; skip on-chain relay, queries, and the manifest commit."

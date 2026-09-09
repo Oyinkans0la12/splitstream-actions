@@ -15,20 +15,26 @@ import { scvI128 } from './merkle.js';
 
 /**
  * Soroban RPC layer — the single integration point with the deployed
- * splitstream-core contract. The contract interface assumed here:
+ * splitstream-core contract. The contract interface (verified against
+ * splitstream-core's source, which is immutable at its deployed contract id):
  *
- *   get_cycle_info() -> Option<CycleInfo>          // latest posted cycle
- *     where CycleInfo is a #[contracttype] record serialized as an ScVal vec:
- *       [ cycle_id: u32, start_ledger: u32, end_ledger: u32, root: Bytes(32), total_amount: i128 ]
+ *   get_cycle_info(cycle_id: u64) -> Option<CycleInfo>
+ *     where CycleInfo is a #[contracttype] record serialized as an ScVal map
+ *     keyed by field-name symbols:
+ *       { root: Bytes(32), total_amount: i128, posted_at: u64,
+ *         claims_started: bool, replaced: bool }
  *     and None is ScVal void. Adjust `parseCycleInfo` here if the contract's
- *     field types/order differ — this is the one place to look.
+ *     shape ever differs — this is the one place to look.
  *
- *   post_cycle_root(cycle_id: u32, root: Bytes(32), total_amount: i128)
+ *   post_cycle_root(cycle_id: u64, root: Bytes(32), total_amount: i128)
  *
- * The window for the next cycle starts at the close time of the previous
- * cycle's `end_ledger` (via RPC getLedgers). Failure modes are loud: a failed
- * submission, an unconfirmed transaction, or an unparseable contract reply all
- * throw RelayError — never "submitted" treated as "succeeded".
+ * The contract CANNOT enumerate posted cycles (there is no "latest cycle"
+ * call), so the window for the next cycle is derived from this repo's own
+ * committed audit trail (manifests/cycle-<id>.json) — see
+ * `readLastManifestWindow` in manifest.ts. get_cycle_info(cycle_id) is used
+ * only as a sanity check against that manifest. Failure modes are loud: a
+ * failed submission, an unconfirmed transaction, or an unparseable contract
+ * reply all throw RelayError — never "submitted" treated as "succeeded".
  */
 
 export class RelayError extends Error {
@@ -39,72 +45,127 @@ export class RelayError extends Error {
 }
 
 export interface CycleInfo {
-  cycleId: number;
-  startLedger: number;
-  endLedger: number;
+  /** 32-byte Merkle root of the payout manifest (BytesN<32>). */
+  root: Buffer;
+  /** Total amount the manifest allocates for this cycle (i128, stroops). */
+  totalAmount: bigint;
+  /** Ledger timestamp (Unix seconds) the root was posted. */
+  postedAt: number;
+  /** True after the first successful claim — locks out replacement. */
+  claimsStarted: boolean;
+  /** True once the root was challenged and replaced (one replacement max). */
+  replaced: boolean;
 }
 
-export function scvU32(value: number): xdr.ScVal {
-  if (!Number.isInteger(value) || value < 0 || value > 0xffffffff) {
-    throw new RelayError(`invalid u32 value: ${value}`);
+export function scvU64(value: number | bigint): xdr.ScVal {
+  let asBigInt: bigint;
+  if (typeof value === 'bigint') {
+    asBigInt = value;
+  } else if (Number.isSafeInteger(value) && value >= 0) {
+    asBigInt = BigInt(value);
+  } else {
+    throw new RelayError(`invalid u64 value: ${value}`);
   }
-  return xdr.ScVal.scvU32(value);
-}
-
-function parseU32OrI128(scVal: xdr.ScVal): number {
-  switch (scVal.type) {
-    case 'scvU32':
-      return scVal.u32;
-    case 'scvI128': {
-      const value = scValToBigInt(scVal);
-      if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
-        throw new RelayError(`contract returned a value too large for a safe JS integer: ${value}`);
-      }
-      return Number(value);
-    }
-    default:
-      throw new RelayError(
-        `unexpected ScVal type '${scVal.type}' where scvU32|scvI128 was expected`,
-      );
+  if (asBigInt > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new RelayError(`invalid u64 value: ${value}`);
   }
+  return xdr.ScVal.scvU64(asBigInt);
 }
 
 /**
- * Parses `get_cycle_info`'s return value. Returns `null` when there is no
- * previous cycle (ScVal void / missing result). Throws on anything else —
- * an unparseable contract reply must never be guessed at.
+ * Parses `get_cycle_info`'s return value. Returns `null` when the contract
+ * has no record for the queried cycle (ScVal void / missing result). Throws on
+ * anything else — an unparseable contract reply must never be guessed at.
+ *
+ * CycleInfo is a `#[contracttype]` struct, which soroban-sdk serializes as an
+ * ScVal map keyed by field-name symbols (root, total_amount, posted_at,
+ * claims_started, replaced); `Option<CycleInfo>` is Void for None and the map
+ * itself for Some. Lookup is by key, so map entry order does not matter.
  */
 export function parseCycleInfo(retval: xdr.ScVal | undefined | null): CycleInfo | null {
   if (retval === undefined || retval === null || retval.type === 'scvVoid') return null;
-  if (retval.type !== 'scvVec') {
-    throw new RelayError(`unexpected get_cycle_info return type: '${retval.type}'`);
-  }
-  const fields = retval.vec;
-  if (fields === null) {
-    throw new RelayError('get_cycle_info returned an empty vec');
-  }
-  if (fields.length < 3) {
+  if (retval.type !== 'scvMap') {
     throw new RelayError(
-      `get_cycle_info returned ${fields.length} field(s); expected at least 3 (cycle_id, start_ledger, end_ledger, ...)`,
+      `unexpected get_cycle_info return type: '${retval.type}' (expected scvMap or scvVoid)`,
     );
   }
+  const entries = retval.map;
+  if (entries === null || entries === undefined || entries.length === 0) {
+    throw new RelayError('get_cycle_info returned an empty map');
+  }
+
+  const byKey = new Map<string, xdr.ScVal>();
+  for (const entry of entries) {
+    if (entry.key.type !== 'scvSymbol') {
+      throw new RelayError(
+        `get_cycle_info returned a map entry with a non-symbol key ('${entry.key.type}')`,
+      );
+    }
+    byKey.set(entry.key.sym.toString(), entry.val);
+  }
+
+  const root = byKey.get('root');
+  const totalAmount = byKey.get('total_amount');
+  const postedAt = byKey.get('posted_at');
+  const claimsStarted = byKey.get('claims_started');
+  const replaced = byKey.get('replaced');
+  if (
+    root === undefined ||
+    totalAmount === undefined ||
+    postedAt === undefined ||
+    claimsStarted === undefined ||
+    replaced === undefined
+  ) {
+    throw new RelayError(
+      `get_cycle_info returned a map missing required fields (found: ${[...byKey.keys()].join(', ') || 'none'})`,
+    );
+  }
+
+  if (root.type !== 'scvBytes' || root.bytes.value.length !== 32) {
+    throw new RelayError(
+      `get_cycle_info root must be a 32-byte Bytes value, got '${root.type}'` +
+        (root.type === 'scvBytes' ? ` (${root.bytes.value.length} bytes)` : ''),
+    );
+  }
+  if (totalAmount.type !== 'scvI128') {
+    throw new RelayError(`get_cycle_info total_amount must be an i128, got '${totalAmount.type}'`);
+  }
+  if (postedAt.type !== 'scvU64') {
+    throw new RelayError(`get_cycle_info posted_at must be a u64, got '${postedAt.type}'`);
+  }
+  const postedAtValue = postedAt.u64;
+  if (postedAtValue > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new RelayError(
+      `get_cycle_info posted_at is too large for a safe JS integer: ${postedAtValue}`,
+    );
+  }
+  if (claimsStarted.type !== 'scvBool' || replaced.type !== 'scvBool') {
+    throw new RelayError(
+      `get_cycle_info claims_started/replaced must be booleans, got '${claimsStarted.type}'/'${replaced.type}'`,
+    );
+  }
+
   return {
-    cycleId: parseU32OrI128(fields[0]!),
-    startLedger: parseU32OrI128(fields[1]!),
-    endLedger: parseU32OrI128(fields[2]!),
+    root: Buffer.from(root.bytes.value),
+    totalAmount: scValToBigInt(totalAmount),
+    postedAt: Number(postedAtValue),
+    claimsStarted: claimsStarted.b,
+    replaced: replaced.b,
   };
 }
 
 /**
- * Reads the latest posted cycle from splitstream-core. Returns `null` when no
- * cycle has been posted yet (cycle 0). Throws on RPC/auth errors — we never
- * silently fall back to an input window when the chain is simply unreachable.
+ * Reads one cycle's info from splitstream-core by id (the contract cannot
+ * enumerate cycles — the caller supplies the id). Returns `null` when the
+ * contract has no record for that cycle. Throws on RPC/auth errors — we never
+ * guess when the chain is unreachable.
  */
-export async function queryLatestCycle(
+export async function queryCycleInfo(
   server: rpc.Server,
   vault: Contract,
   sourcePubkey: string,
   networkPassphrase: string,
+  cycleId: number,
 ): Promise<CycleInfo | null> {
   let account;
   try {
@@ -117,7 +178,7 @@ export async function queryLatestCycle(
   }
 
   const tx = new TransactionBuilder(account, { fee: BASE_FEE, networkPassphrase })
-    .addOperation(vault.call('get_cycle_info'))
+    .addOperation(vault.call('get_cycle_info', scvU64(cycleId)))
     .setTimeout(TimeoutInfinite)
     .build();
 
@@ -206,7 +267,7 @@ export async function relayCycleRoot(opts: {
     .addOperation(
       vault.call(
         'post_cycle_root',
-        scvU32(cycleId),
+        scvU64(cycleId),
         nativeToScVal(root),
         scvI128(totalAmount),
       ),

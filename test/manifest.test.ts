@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { buildManifest, computePayouts, ManifestError } from '../src/manifest.js';
+import { tmpdir } from 'node:os';
+import {
+  buildManifest,
+  computePayouts,
+  ManifestError,
+  readLastManifestWindow,
+} from '../src/manifest.js';
 import { loadRegistry } from '../src/registry.js';
 
 const REGISTRY = loadRegistry(join(import.meta.dirname, 'fixtures', 'splitstream.valid.yml'));
@@ -86,6 +93,78 @@ describe('computePayouts (frozen formula)', () => {
 
   it('rejects a points map referencing an unknown contributor (internal invariant)', () => {
     expect(() => computePayouts(pointsMap([['ghost', 5]]), REGISTRY, 100n)).toThrow(ManifestError);
+  });
+});
+
+describe('readLastManifestWindow (cycle-window detection)', () => {
+  function fixtureDir(files: Record<string, string>): string {
+    const dir = mkdtempSync(join(tmpdir(), 'splitstream-manifest-'));
+    for (const [name, content] of Object.entries(files)) {
+      writeFileSync(join(dir, name), content);
+    }
+    return dir;
+  }
+
+  function manifest(cycleId: number, generatedAt: string): string {
+    return JSON.stringify({ cycleId, generatedAt, poolAmount: '1', totalPoints: 0, entries: [], dustRemainder: '0', merkleRoot: '00'.repeat(32) });
+  }
+
+  it('returns null when the directory does not exist (cycle 0)', () => {
+    expect(readLastManifestWindow(join(tmpdir(), 'no-such-dir-xyz'))).toBeNull();
+  });
+
+  it('returns null when no cycle manifests exist (cycle 0)', () => {
+    const dir = fixtureDir({ 'unrelated.txt': 'hi' });
+    expect(readLastManifestWindow(dir)).toBeNull();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('takes the highest cycle id and its generatedAt as the window boundary', () => {
+    const dir = fixtureDir({
+      'cycle-0.json': manifest(0, '2026-08-25T00:00:00.000Z'),
+      'cycle-1.json': manifest(1, '2026-09-01T00:00:00.000Z'),
+      'cycle-2.json': manifest(2, '2026-09-08T00:00:00.000Z'),
+    });
+    expect(readLastManifestWindow(dir)).toEqual({
+      cycleId: 2,
+      generatedAt: '2026-09-08T00:00:00.000Z',
+    });
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('ignores dry-run artifacts (cycle-<id>.dry-run.json)', () => {
+    const dir = fixtureDir({
+      'cycle-1.dry-run.json': manifest(1, '2026-09-01T00:00:00.000Z'),
+      'cycle-2.json': manifest(2, '2026-09-08T00:00:00.000Z'),
+    });
+    expect(readLastManifestWindow(dir)).toEqual({
+      cycleId: 2,
+      generatedAt: '2026-09-08T00:00:00.000Z',
+    });
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('throws when a manifest filename id disagrees with its content', () => {
+    const dir = fixtureDir({ 'cycle-2.json': manifest(3, '2026-09-08T00:00:00.000Z') });
+    expect(() => readLastManifestWindow(dir)).toThrow(ManifestError);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('throws on malformed JSON in the highest manifest', () => {
+    const dir = fixtureDir({
+      'cycle-1.json': manifest(1, '2026-09-01T00:00:00.000Z'),
+      'cycle-2.json': '{not json',
+    });
+    expect(() => readLastManifestWindow(dir)).toThrow(ManifestError);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('throws when the highest manifest lacks a valid generatedAt', () => {
+    const dir = fixtureDir({
+      'cycle-2.json': JSON.stringify({ cycleId: 2 }),
+    });
+    expect(() => readLastManifestWindow(dir)).toThrow(ManifestError);
+    rmSync(dir, { recursive: true, force: true });
   });
 });
 

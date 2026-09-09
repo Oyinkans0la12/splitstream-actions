@@ -76,7 +76,7 @@ ORACLE_SECRET_KEY=S... \
 npm test
 ```
 
-- Read-only tests: `queryLatestCycle` + `ledgerCloseTime` against testnet.
+- Read-only tests: `queryCycleInfo` + `ledgerCloseTime` against testnet.
 - The state-changing submit test additionally requires `RUN_RELAY_SUBMIT=1` —
   it posts a real `post_cycle_root` with a deliberately absurd cycle id
   (`999999`) so it can never collide with a real cycle. Run it only against a

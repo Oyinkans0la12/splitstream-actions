@@ -1,4 +1,6 @@
-import { findContributor, type SplitstreamConfig } from './registry.js';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { describeError, findContributor, type SplitstreamConfig } from './registry.js';
 
 /**
  * Points -> payout computation. The formula is FROZEN (shared contract with
@@ -98,6 +100,80 @@ export function computePayouts(
     totalDistributed: totalDistributed.toString(),
     dustRemainder: dustRemainder.toString(),
   };
+}
+
+export interface ManifestWindow {
+  cycleId: number;
+  /** `generatedAt` of the last committed manifest — the new cycle's `since` boundary. */
+  generatedAt: string;
+}
+
+/**
+ * Finds the last posted cycle from this repo's committed audit trail
+ * (`manifests/cycle-<id>.json`), which is the source of truth for the next
+ * cycle's window — the deployed contract cannot enumerate cycles.
+ *
+ * Returns `null` when no manifest exists yet (cycle 0 — the caller falls back
+ * to the `since`/`cycle_id` workflow inputs). Throws on a corrupt audit trail
+ * (unreadable directory, malformed JSON, missing `generatedAt`, or a filename
+ * whose `<id>` disagrees with the manifest's `cycleId`) — never guesses.
+ */
+export function readLastManifestWindow(manifestDir: string): ManifestWindow | null {
+  let entries;
+  try {
+    entries = readdirSync(manifestDir, { withFileTypes: true });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return null; // no audit trail yet — this is cycle 0
+    }
+    throw new ManifestError(
+      `cannot read manifest directory '${manifestDir}': ${describeError(err)}`,
+      { cause: err },
+    );
+  }
+
+  // cycle-<id>.json only — dry-run artifacts (cycle-<id>.dry-run.json) never count.
+  const ids = entries
+    .filter((entry) => entry.isFile())
+    .map((entry) => /^cycle-(\d+)\.json$/.exec(entry.name))
+    .filter((match): match is RegExpExecArray => match !== null)
+    .map((match) => Number(match[1]))
+    .filter((id) => Number.isSafeInteger(id));
+  if (ids.length === 0) return null;
+
+  const lastCycleId = Math.max(...ids);
+  const path = join(manifestDir, `cycle-${lastCycleId}.json`);
+  let raw: string;
+  try {
+    raw = readFileSync(path, 'utf8');
+  } catch (err) {
+    throw new ManifestError(`cannot read committed manifest '${path}': ${describeError(err)}`, {
+      cause: err,
+    });
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new ManifestError(`committed manifest '${path}' is not valid JSON: ${describeError(err)}`, {
+      cause: err,
+    });
+  }
+
+  const cycleId = (parsed as { cycleId?: unknown }).cycleId;
+  if (cycleId !== lastCycleId) {
+    throw new ManifestError(
+      `committed manifest '${path}' has cycleId=${cycleId}; filename and content disagree`,
+    );
+  }
+  const generatedAt = (parsed as { generatedAt?: unknown }).generatedAt;
+  if (typeof generatedAt !== 'string' || Number.isNaN(Date.parse(generatedAt))) {
+    throw new ManifestError(
+      `committed manifest '${path}' is missing a valid generatedAt timestamp`,
+    );
+  }
+  return { cycleId: lastCycleId, generatedAt };
 }
 
 export function buildManifest(opts: {
