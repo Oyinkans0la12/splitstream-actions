@@ -12,18 +12,55 @@ inputs:
       the maintainer per cycle (e.g. the Wave payout actually received that
       week). Never inferred.
     required: true
+  cycle_id:
+    description: >-
+      The cycle id recorded in the manifest and relayed on-chain. Required for
+      cycle 0 and in dry-run mode; otherwise inferred from on-chain state
+      (last posted cycle + 1).
+    required: false
   since:
     description: >-
-      Fallback cycle-start boundary (ISO 8601 timestamp) used only when no
-      previous cycle exists on-chain (cycle 0). Ignored once
+      Fallback cycle-start boundary (ISO 8601 timestamp) used when no previous
+      cycle exists on-chain (cycle 0) and in dry-run mode. Ignored once
       splitstream-core.get_cycle_info returns a last cycle.
     required: false
   dry_run:
     description: >-
       Compute the manifest, dust remainder, and Merkle root but skip the
-      on-chain relay. Used by the self-test workflow.
+      on-chain relay and any ledger/cycle queries. Used by self-tests.
     required: false
     default: "false"
+  config_path:
+    description: >-
+      Path to the contributor registry (splitstream.yml), relative to the repo
+      root the action runs in.
+    required: false
+    default: ".github/splitstream.yml"
+  rpc_url:
+    description: >-
+      Soroban RPC endpoint override. Defaults to SDF testnet
+      (https://soroban-testnet.stellar.org) or Gateway mainnet
+      (https://soroban-rpc.mainnet.stellar.gateway.fm) based on the registry's
+      `network`.
+    required: false
+  manifest_dir:
+    description: >-
+      Directory (relative to the repo root) where the distribution manifest is
+      written as the audit trail before the relay step runs.
+    required: false
+    default: "manifests"
+
+outputs:
+  cycle_id:
+    description: "The cycle id of the manifest just generated."
+  manifest_path:
+    description: "Path to the generated distribution manifest."
+  merkle_root:
+    description: "Hex-encoded 32-byte Merkle root over the payout leaves."
+  dust_remainder:
+    description: "Undistributed pool remainder in stroops, left in the vault."
+  dry_run:
+    description: "Whether the run was a dry run ('true' or 'false')."
 
 runs:
   using: node24

@@ -1,7 +1,10 @@
 node_modules/
-dist/
 coverage/
 *.tsbuildinfo
 .DS_Store
 .env
 .env.*
+
+# NOTE: dist/ is intentionally NOT ignored. action.yml runs dist/index.js
+# (node24 runtime), so the ncc bundle must be committed for `uses: ./` to work.
+# Rebuild with `npm run build` before committing action changes.
