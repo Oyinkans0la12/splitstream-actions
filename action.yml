@@ -1,0 +1,34 @@
+name: "SplitStream Wave Cycle Close"
+description: >-
+  Compute the on-chain distribution manifest for a closed Wave sprint cycle
+  (points from merged PRs across the org, Merkle root over payout leaves) and
+  relay the root to the deployed splitstream-core contract via Soroban RPC.
+  This action never holds funds — it only computes and relays.
+
+inputs:
+  cycle_pool_amount:
+    description: >-
+      The cycle pool to distribute, in stroops, as a string. Explicitly set by
+      the maintainer per cycle (e.g. the Wave payout actually received that
+      week). Never inferred.
+    required: true
+  since:
+    description: >-
+      Fallback cycle-start boundary (ISO 8601 timestamp) used only when no
+      previous cycle exists on-chain (cycle 0). Ignored once
+      splitstream-core.get_cycle_info returns a last cycle.
+    required: false
+  dry_run:
+    description: >-
+      Compute the manifest, dust remainder, and Merkle root but skip the
+      on-chain relay. Used by the self-test workflow.
+    required: false
+    default: "false"
+
+runs:
+  using: node24
+  main: dist/index.js
+
+branding:
+  icon: "git-merge"
+  color: "purple"
