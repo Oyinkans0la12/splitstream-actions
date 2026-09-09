@@ -1,0 +1,17 @@
+version: 1
+repos:
+  - owner: your-org
+    name: splitstream-core
+  - owner: your-org
+    name: splitstream-actions
+  - owner: your-org
+    name: splitstream-sdk-cli
+contributors:
+  - github: octocat
+    stellar: GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF
+  - github: some-dev
+    stellar: GC3BLRQMHJGDIBAVHA2WQOY6Q7CBLAZUNZPIR5NYAX6XTQZUSTVRHHPK
+oracleAccount: GCWSW5ZMOHGEBLUFKL7PZGPZKW3OMMDCAT4OMBFKWHXNIUGWGG43HQ7C
+tokenContract: CAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQC526
+vaultContract: CABAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAFNSZ
+network: testnet
