@@ -10,7 +10,7 @@ import {
   networkPassphrase,
 } from './registry.js';
 import { ingestCycle } from './ingest.js';
-import { attributePoints } from './points.js';
+import { countIssuesByContributor } from './counts.js';
 import { buildManifest, computePayouts, readLastManifestWindow } from './manifest.js';
 import { buildMerkleRoot } from './merkle.js';
 import { queryCycleInfo, relayCycleRoot } from './relay.js';
@@ -22,8 +22,11 @@ import { queryCycleInfo, relayCycleRoot } from './relay.js';
  *      (this repo's audit trail, the source of truth), or the `since` input for
  *      cycle 0 / dry runs. get_cycle_info is used only as a sanity check.
  *   3. Crawl merged PRs across every repo in the registry, resolve closing
- *      issues, attribute points to PR authors (summed across repos).
- *   4. Compute payouts (floor formula), dust remainder, Merkle root.
+ *      issues, count each contributor's distinct closed issues (summed across
+ *      repos). No labels are read — any issue closed via a merged PR with a
+ *      closing keyword qualifies.
+ *   4. Compute payouts (floor formula over issue counts), dust remainder,
+ *      Merkle root.
  *   5. Write the manifest to manifests/cycle-<id>.json as the audit trail.
  *   6. Unless dry-run: relay post_cycle_root via Soroban RPC and confirm it
  *      landed; print the tx to the job summary.
@@ -173,22 +176,21 @@ async function main(): Promise<void> {
     `ingested ${mergedPrCount} merged PR(s) in window; ${contributions.length} (PR, issue) contribution(s) with closing references`,
   );
 
-  const { pointsByGithub, unregistered, labelConflicts } = attributePoints(contributions, registry);
-  for (const conflict of labelConflicts) core.warning(conflict);
+  const { countsByGithub, unregistered } = countIssuesByContributor(contributions, registry);
   if (unregistered.length > 0) {
     core.warning(
       `unregistered PR authors are NOT paid this cycle; add them to ${configPath} before the next cycle:`,
     );
     for (const entry of unregistered) {
-      core.warning(`  - ${entry.github}: ${entry.points} pts (${entry.repos.join(', ')})`);
+      core.warning(`  - ${entry.github}: ${entry.issues} issue(s) (${entry.repos.join(', ')})`);
     }
   }
   core.info(
-    `points attributed: ${[...pointsByGithub.entries()].map(([g, p]) => `${g}=${p}`).join(', ') || '(none)'}`,
+    `issues counted: ${[...countsByGithub.entries()].map(([g, c]) => `${g}=${c}`).join(', ') || '(none)'}`,
   );
 
   // --- payouts + manifest + merkle ---
-  const payouts = computePayouts(pointsByGithub, registry, poolAmount);
+  const payouts = computePayouts(countsByGithub, registry, poolAmount);
   const merkle = buildMerkleRoot(
     payouts.entries.map((entry) => ({ stellar: entry.stellar, amount: BigInt(entry.amount) })),
   );
