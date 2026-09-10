@@ -168,7 +168,7 @@ async function main(): Promise<void> {
     relayContext = { server, vault, keypair };
   }
 
-  // --- ingestion + points ---
+  // --- ingestion + issue counts ---
   const octokit = getOctokit(githubToken);
   const { contributions, mergedPrCount, warnings } = await ingestCycle(octokit, registry.repos, sinceIso);
   for (const warning of warnings) core.warning(warning);
@@ -198,7 +198,7 @@ async function main(): Promise<void> {
   const manifest = buildManifest({
     cycleId,
     poolAmount: poolAmount.toString(),
-    totalPoints: payouts.totalPoints,
+    totalIssuesClosed: payouts.totalIssuesClosed,
     entries: payouts.entries,
     dustRemainder: payouts.dustRemainder,
     merkleRoot: merkleRootHex,
@@ -209,7 +209,7 @@ async function main(): Promise<void> {
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   core.info(`wrote distribution manifest to ${manifestPath}`);
   core.info(
-    `pool=${manifest.poolAmount} stroops, totalPoints=${manifest.totalPoints}, ` +
+    `pool=${manifest.poolAmount} stroops, totalIssuesClosed=${manifest.totalIssuesClosed}, ` +
       `dustRemainder=${manifest.dustRemainder} stroops (left in vault), merkleRoot=${merkleRootHex}`,
   );
 

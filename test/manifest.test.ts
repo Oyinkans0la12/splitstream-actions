@@ -12,29 +12,29 @@ import { loadRegistry } from '../src/registry.js';
 
 const REGISTRY = loadRegistry(join(import.meta.dirname, 'fixtures', 'splitstream.valid.yml'));
 
-function pointsMap(entries: Array<[string, number]>): Map<string, number> {
+function countsMap(entries: Array<[string, number]>): Map<string, number> {
   return new Map(entries);
 }
 
 describe('computePayouts (frozen formula)', () => {
-  it('computes floor(pool * points / total) per contributor', () => {
-    // Spec example: pool 5_000_000_000, octocat 200 of 950 pts -> floor(5e9*200/950)
+  it('computes floor(pool * issues_closed / total) per contributor', () => {
+    // Pool 5_000_000_000, octocat closes 3 of 4 issues -> floor(5e9*3/4)
     const result = computePayouts(
-      pointsMap([
-        ['octocat', 200],
-        ['some-dev', 750],
+      countsMap([
+        ['octocat', 3],
+        ['some-dev', 1],
       ]),
       REGISTRY,
       5_000_000_000n,
     );
-    expect(result.totalPoints).toBe(950);
+    expect(result.totalIssuesClosed).toBe(4);
     const octocat = result.entries.find((e) => e.github === 'octocat')!;
-    expect(octocat.amount).toBe('1052631578'); // 5_000_000_000 * 200 / 950 floored
+    expect(octocat.amount).toBe('3750000000'); // 5_000_000_000 * 3 / 4 floored
     expect(octocat.stellar).toBe(REGISTRY.contributors[0]!.stellar);
   });
 
   it('keeps every amount as a decimal string, never a JS number', () => {
-    const result = computePayouts(pointsMap([['octocat', 1]]), REGISTRY, 1_000_000_000_000_000_000n);
+    const result = computePayouts(countsMap([['octocat', 1]]), REGISTRY, 1_000_000_000_000_000_000n);
     for (const entry of result.entries) {
       expect(typeof entry.amount).toBe('string');
       expect(entry.amount).toMatch(/^\d+$/);
@@ -44,7 +44,7 @@ describe('computePayouts (frozen formula)', () => {
 
   it('records the integer-division dust remainder explicitly', () => {
     const result = computePayouts(
-      pointsMap([
+      countsMap([
         ['octocat', 3],
         ['some-dev', 1],
       ]),
@@ -59,7 +59,7 @@ describe('computePayouts (frozen formula)', () => {
 
   it('distributes exactly the pool when it divides evenly', () => {
     const result = computePayouts(
-      pointsMap([
+      countsMap([
         ['octocat', 1],
         ['some-dev', 1],
       ]),
@@ -70,29 +70,29 @@ describe('computePayouts (frozen formula)', () => {
     expect(result.dustRemainder).toBe('0');
   });
 
-  it('sorts entries deterministically (points desc, then handle)', () => {
+  it('sorts entries deterministically (issues closed desc, then handle)', () => {
     const result = computePayouts(
-      pointsMap([
-        ['some-dev', 100],
-        ['octocat', 200],
+      countsMap([
+        ['some-dev', 1],
+        ['octocat', 3],
       ]),
       REGISTRY,
-      300n,
+      400n,
     );
     expect(result.entries.map((e) => e.github)).toEqual(['octocat', 'some-dev']);
   });
 
   it('rejects a zero pool', () => {
-    expect(() => computePayouts(pointsMap([['octocat', 1]]), REGISTRY, 0n)).toThrow(ManifestError);
-    expect(() => computePayouts(pointsMap([['octocat', 1]]), REGISTRY, -5n)).toThrow(ManifestError);
+    expect(() => computePayouts(countsMap([['octocat', 1]]), REGISTRY, 0n)).toThrow(ManifestError);
+    expect(() => computePayouts(countsMap([['octocat', 1]]), REGISTRY, -5n)).toThrow(ManifestError);
   });
 
-  it('rejects a zero-point cycle', () => {
+  it('rejects a zero-issue cycle', () => {
     expect(() => computePayouts(new Map(), REGISTRY, 100n)).toThrow(ManifestError);
   });
 
-  it('rejects a points map referencing an unknown contributor (internal invariant)', () => {
-    expect(() => computePayouts(pointsMap([['ghost', 5]]), REGISTRY, 100n)).toThrow(ManifestError);
+  it('rejects a counts map referencing an unknown contributor (internal invariant)', () => {
+    expect(() => computePayouts(countsMap([['ghost', 5]]), REGISTRY, 100n)).toThrow(ManifestError);
   });
 });
 
@@ -106,7 +106,7 @@ describe('readLastManifestWindow (cycle-window detection)', () => {
   }
 
   function manifest(cycleId: number, generatedAt: string): string {
-    return JSON.stringify({ cycleId, generatedAt, poolAmount: '1', totalPoints: 0, entries: [], dustRemainder: '0', merkleRoot: '00'.repeat(32) });
+    return JSON.stringify({ cycleId, generatedAt, poolAmount: '1', totalIssuesClosed: 0, entries: [], dustRemainder: '0', merkleRoot: '00'.repeat(32) });
   }
 
   it('returns null when the directory does not exist (cycle 0)', () => {
@@ -173,9 +173,9 @@ describe('buildManifest', () => {
     const manifest = buildManifest({
       cycleId: 4,
       poolAmount: '5000000000',
-      totalPoints: 950,
+      totalIssuesClosed: 4,
       entries: [
-        { github: 'octocat', stellar: 'GAAAA', points: 200, amount: '1052631578' },
+        { github: 'octocat', stellar: 'GAAAA', issuesClosed: 3, amount: '3750000000' },
       ],
       dustRemainder: '3',
       merkleRoot: '00'.repeat(32),
@@ -185,8 +185,8 @@ describe('buildManifest', () => {
       cycleId: 4,
       generatedAt: '2026-09-08T00:00:00.000Z',
       poolAmount: '5000000000',
-      totalPoints: 950,
-      entries: [{ github: 'octocat', stellar: 'GAAAA', points: 200, amount: '1052631578' }],
+      totalIssuesClosed: 4,
+      entries: [{ github: 'octocat', stellar: 'GAAAA', issuesClosed: 3, amount: '3750000000' }],
       dustRemainder: '3',
       merkleRoot: '00'.repeat(32),
     });

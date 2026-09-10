@@ -3,16 +3,18 @@ import { join } from 'node:path';
 import { describeError, findContributor, type SplitstreamConfig } from './registry.js';
 
 /**
- * Points -> payout computation. The formula is FROZEN (shared contract with
- * splitstream-core and splitstream-sdk-cli):
+ * Issue-count -> payout computation. The formula is FROZEN (shared contract
+ * with splitstream-core and splitstream-sdk-cli):
  *
- *   contributor_amount = floor(cycle_pool_amount * contributor_points / total_points_this_cycle)
+ *   contributor_amount = floor(cycle_pool_amount * contributor_issues_closed / total_issues_closed_this_cycle)
  *
- * `cycle_pool_amount` is an explicit workflow input in stroops (never
- * inferred). The integer-division remainder is never silently dropped and never
- * redistributed: it is recorded as `dustRemainder` and left in the vault for a
- * future reserve sweep. All monetary amounts are decimal strings end-to-end —
- * BigInt only at the point of use, never JS number.
+ * A qualifying issue is any issue closed via a merged PR containing a
+ * recognized closing keyword — no label of any kind is required. `cycle_pool_amount`
+ * is an explicit workflow input in stroops (never inferred). The
+ * integer-division remainder is never silently dropped and never redistributed:
+ * it is recorded as `dustRemainder` and left in the vault for a future reserve
+ * sweep. All monetary amounts are decimal strings end-to-end — BigInt only at
+ * the point of use, never JS number.
  */
 
 export class ManifestError extends Error {
@@ -25,14 +27,15 @@ export class ManifestError extends Error {
 export interface PayoutEntry {
   github: string;
   stellar: string;
-  points: number;
+  /** Distinct issues closed by this contributor's PRs this cycle. */
+  issuesClosed: number;
   /** Stroops as a decimal string. */
   amount: string;
 }
 
 export interface PayoutResult {
   entries: PayoutEntry[];
-  totalPoints: number;
+  totalIssuesClosed: number;
   /** Stroops as a decimal string. */
   totalDistributed: string;
   /** Stroops as a decimal string; pool - sum(amounts). */
@@ -44,7 +47,7 @@ export interface DistributionManifest {
   generatedAt: string;
   /** Stroops as a decimal string. */
   poolAmount: string;
-  totalPoints: number;
+  totalIssuesClosed: number;
   entries: PayoutEntry[];
   /** Stroops as a decimal string. */
   dustRemainder: string;
@@ -53,7 +56,7 @@ export interface DistributionManifest {
 }
 
 export function computePayouts(
-  pointsByGithub: Map<string, number>,
+  issuesByGithub: Map<string, number>,
   registry: SplitstreamConfig,
   poolAmount: bigint,
 ): PayoutResult {
@@ -63,40 +66,40 @@ export function computePayouts(
     );
   }
 
-  const totalPoints = [...pointsByGithub.values()].reduce((sum, points) => sum + points, 0);
-  if (totalPoints <= 0) {
+  const totalIssuesClosed = [...issuesByGithub.values()].reduce((sum, count) => sum + count, 0);
+  if (totalIssuesClosed <= 0) {
     throw new ManifestError(
-      'no points were attributed this cycle; refusing to compute a distribution over a zero-point cycle',
+      'no issues were closed this cycle; refusing to compute a distribution over a zero-issue cycle',
     );
   }
 
   const entries: PayoutEntry[] = [];
-  for (const [github, points] of pointsByGithub) {
+  for (const [github, issuesClosed] of issuesByGithub) {
     const contributor = findContributor(registry, github);
     if (contributor === undefined) {
-      // attributePoints() guarantees membership; reaching this is a bug, fail loudly.
+      // countIssuesByContributor() guarantees membership; reaching this is a bug, fail loudly.
       throw new ManifestError(
-        `internal error: contributor '${github}' has points but is missing from the registry`,
+        `internal error: contributor '${github}' has closed issues but is missing from the registry`,
       );
     }
-    const amount = (poolAmount * BigInt(points)) / BigInt(totalPoints); // floor
+    const amount = (poolAmount * BigInt(issuesClosed)) / BigInt(totalIssuesClosed); // floor
     entries.push({
       github: contributor.github,
       stellar: contributor.stellar,
-      points,
+      issuesClosed,
       amount: amount.toString(),
     });
   }
 
-  // Deterministic review order: most points first, then handle.
-  entries.sort((a, b) => b.points - a.points || a.github.localeCompare(b.github));
+  // Deterministic review order: most issues closed first, then handle.
+  entries.sort((a, b) => b.issuesClosed - a.issuesClosed || a.github.localeCompare(b.github));
 
   const totalDistributed = entries.reduce((sum, entry) => sum + BigInt(entry.amount), 0n);
   const dustRemainder = poolAmount - totalDistributed;
 
   return {
     entries,
-    totalPoints,
+    totalIssuesClosed,
     totalDistributed: totalDistributed.toString(),
     dustRemainder: dustRemainder.toString(),
   };
@@ -179,7 +182,7 @@ export function readLastManifestWindow(manifestDir: string): ManifestWindow | nu
 export function buildManifest(opts: {
   cycleId: number;
   poolAmount: string;
-  totalPoints: number;
+  totalIssuesClosed: number;
   entries: PayoutEntry[];
   dustRemainder: string;
   merkleRoot: string;
@@ -189,7 +192,7 @@ export function buildManifest(opts: {
     cycleId: opts.cycleId,
     generatedAt: opts.generatedAt ?? new Date().toISOString(),
     poolAmount: opts.poolAmount,
-    totalPoints: opts.totalPoints,
+    totalIssuesClosed: opts.totalIssuesClosed,
     entries: opts.entries,
     dustRemainder: opts.dustRemainder,
     merkleRoot: opts.merkleRoot,
