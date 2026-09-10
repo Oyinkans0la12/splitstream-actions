@@ -59,7 +59,7 @@ GITHUB_TOKEN / ORACLE_SECRET ┘                                                
    leaves are `sha256(Address XDR || i128 XDR)` — byte-identical to
    splitstream-core's `merkle::leaf_hash` (see [Merkle leaf](#merkle-leaf-format)).
    The leaf format is unchanged by the count-based formula: the contract only
-   ever verifies `(address, amount)` pairs and never knew about points.
+   ever verifies `(address, amount)` pairs — the formula never enters the leaf.
 7. **Relay** — unless `dry_run`, builds and signs
    `post_cycle_root(cycle_id, root, total_amount)` with the oracle keypair,
    submits via Soroban RPC, **polls until the transaction lands**, and fails the
