@@ -90,6 +90,24 @@ and two tree roots. The values were derived independently from the XDR layout
 **authoritative check is splitstream-core's own Rust test suite**. Before the
 first real relay, regenerate the fixture there:
 
+### Cross-check record — VERIFIED
+
+On **2026-09-10** the fixture was cross-checked byte-for-byte against the live
+splitstream-core Rust implementation (`merkle::leaf_hash` + `hash_pair`, soroban-sdk
+27.0.6) via a throwaway `cargo test` on a checkout of
+`Oyinkans0la12/splitstream-core@main`. All three fixture values matched:
+
+| Value | splitstream-core Rust output | Match |
+|---|---|---|
+| `leaf` for `GAAAA…WHF` / `1052631578` | `e89c8b63…33c206` | ✅ identical |
+| `tree3.rootHex` | `42cb7efad0…0663f94f` | ✅ identical |
+| `tree4.rootHex` | `b9f5a8aefae…36197b24` | ✅ identical |
+
+No change to `src/merkle.ts` was needed — the golden fixture is authoritative and
+pinned by the Rust contract. If a future splitstream-core change ever alters
+`merkle.rs` (it is frozen — treat any change as a breaking protocol change),
+re-run this cross-check before trusting relayed roots.
+
 ```rust
 // In splitstream-core's tests (soroban-sdk):
 use soroban_sdk::{xdr::{ToXdr, Hash}, Address, Env};
