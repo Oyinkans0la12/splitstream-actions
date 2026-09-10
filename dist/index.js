@@ -103499,15 +103499,28 @@ async function ledgerCloseTime(server, ledgerSeq) {
  * Builds, signs, submits and confirms `post_cycle_root(cycle_id, root, total_amount)`.
  *
  * The oracle keypair comes from the `ORACLE_SECRET_KEY` secret (loaded by the
- * caller) and is only ever used in memory. An optional `feeBumpKeypair`
- * (FEE_BUMP_SECRET_KEY) wraps the transaction in a fee bump when the relay
- * account's own balance is a concern. Fails loudly unless the transaction
- * lands with status SUCCESS — polling, not fire-and-forget.
+ * caller) and is only ever used in memory. Before any RPC call, the keypair's
+ * public key is asserted to match the registry's `oracleAccount` — relaying
+ * from the wrong identity means either the wrong secret was configured or the
+ * registry is stale, and either way the on-chain post would be signed by an
+ * unauthorized account. An optional `feeBumpKeypair` (FEE_BUMP_SECRET_KEY)
+ * wraps the transaction in a fee bump when the relay account's own balance is
+ * a concern. Fails loudly unless the transaction lands with status SUCCESS —
+ * polling, not fire-and-forget.
  */
 async function relayCycleRoot(opts) {
-    const { server, vault, keypair, networkPassphrase, cycleId, root, totalAmount } = opts;
+    const { server, vault, keypair, expectedOracleAccount, networkPassphrase, cycleId, root, totalAmount, } = opts;
     if (root.length !== 32) {
         throw new RelayError(`merkle root must be exactly 32 bytes, got ${root.length}`);
+    }
+    // Oracle self-verification — before any RPC call. A mismatch means the
+    // configured ORACLE_SECRET_KEY does not belong to the registered oracle
+    // account; relaying anyway would post a root the contract's oracle-gate
+    // would reject (or, worse, sign with an unintended identity). Fail loudly.
+    const actualOracle = keypair.publicKey();
+    if (actualOracle !== expectedOracleAccount) {
+        throw new RelayError(`oracle identity mismatch: ORACLE_SECRET_KEY resolves to ${actualOracle}, ` +
+            `but the registry's oracleAccount is ${expectedOracleAccount}; refusing to relay`);
     }
     let account;
     try {
@@ -103753,6 +103766,7 @@ async function main() {
         server,
         vault,
         keypair,
+        expectedOracleAccount: registry.oracleAccount,
         networkPassphrase: networkPassphrase(registry.network),
         cycleId,
         root: merkle.root,

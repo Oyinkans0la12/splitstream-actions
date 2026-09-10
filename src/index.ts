@@ -233,6 +233,7 @@ async function main(): Promise<void> {
     server,
     vault,
     keypair,
+    expectedOracleAccount: registry.oracleAccount,
     networkPassphrase: networkPassphrase(registry.network),
     cycleId,
     root: merkle.root,

@@ -32,6 +32,56 @@ const runReadOnly =
   oracleSecret !== '';
 const runSubmit = runReadOnly && process.env.RUN_RELAY_SUBMIT === '1';
 
+describe('relayCycleRoot oracle self-verification (unit)', () => {
+  it('fails loudly before any RPC call when the secret does not match the registry oracleAccount', async () => {
+    const keypair = Keypair.random();
+    const otherKeypair = Keypair.random();
+    // A trap server: if the identity check does not run first, getAccount
+    // would be hit and throw — the mismatch must be caught before any RPC.
+    const trapServer = {
+      getAccount: async () => {
+        throw new Error('RPC should never be reached: oracle identity mismatch must fail first');
+      },
+    } as unknown as rpc.Server;
+    await expect(
+      relayCycleRoot({
+        server: trapServer,
+        vault: new Contract('CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM'),
+        keypair,
+        expectedOracleAccount: otherKeypair.publicKey(),
+        networkPassphrase: networkPassphrase('testnet'),
+        cycleId: 1,
+        root: Buffer.alloc(32, 0xab),
+        totalAmount: 1n,
+      }),
+    ).rejects.toThrow(/oracle identity mismatch/);
+  });
+
+  it('accepts a matching secret and proceeds to the RPC layer', async () => {
+    const keypair = Keypair.random();
+    let rpcCalled = false;
+    const stubServer = {
+      getAccount: async () => {
+        rpcCalled = true;
+        throw new Error('getAccount reached (expected — identity matched)');
+      },
+    } as unknown as rpc.Server;
+    await expect(
+      relayCycleRoot({
+        server: stubServer,
+        vault: new Contract('CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM'),
+        keypair,
+        expectedOracleAccount: keypair.publicKey(),
+        networkPassphrase: networkPassphrase('testnet'),
+        cycleId: 1,
+        root: Buffer.alloc(32, 0xab),
+        totalAmount: 1n,
+      }),
+    ).rejects.toThrow(/getAccount reached/);
+    expect(rpcCalled).toBe(true);
+  });
+});
+
 describe.skipIf(!runReadOnly)('relay integration (testnet, read-only)', () => {
   // Construction happens inside the tests: describe.skipIf still evaluates the
   // callback body, so building the client here would throw when gated off.
@@ -77,6 +127,7 @@ describe.skipIf(!runSubmit)('relay submit (testnet, state-changing)', () => {
       server,
       vault,
       keypair,
+      expectedOracleAccount: keypair.publicKey(),
       networkPassphrase: networkPassphrase('testnet'),
       // Deliberately absurd cycle id so it can never collide with a real cycle.
       cycleId: 999_999,
