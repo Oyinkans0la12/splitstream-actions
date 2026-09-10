@@ -102864,7 +102864,7 @@ const contributorSchema = object({
 const splitstreamConfigSchema = object({
     version: literal(1, { error: 'version must be 1' }),
     repos: src_array(repoSchema)
-        .min(1, 'repos must not be empty — at least one repo must contribute points')
+        .min(1, 'repos must not be empty — at least one repo must contribute issues')
         .superRefine((repos, ctx) => {
         const seen = new Set();
         repos.forEach((repo, i) => {
@@ -103034,108 +103034,53 @@ async function findMergedPullRequests(octokit, repos, sinceIso) {
     }
     return { prs, warnings };
 }
-async function fetchIssueLabels(octokit, owner, repo, issueNumber) {
-    let data;
-    try {
-        ({ data } = await octokit.rest.issues.get({ owner, repo, issue_number: issueNumber }));
-    }
-    catch (err) {
-        throw new IngestError(`failed to load issue #${issueNumber} in ${owner}/${repo}: ${describeError(err)}`, { cause: err });
-    }
-    return data.labels.map((label) => (typeof label === 'string' ? label : (label.name ?? ''))).filter((name) => name !== '');
-}
 async function ingestCycle(octokit, repos, sinceIso) {
     const { prs, warnings } = await findMergedPullRequests(octokit, repos, sinceIso);
     const contributions = [];
     for (const pr of prs) {
         const refs = extractClosingIssueRefs(pr.body);
-        if (refs.length === 0)
-            continue;
-        const settled = await Promise.allSettled(refs.map((issueNumber) => fetchIssueLabels(octokit, pr.owner, pr.repo, issueNumber).then((labels) => ({ issueNumber, labels }))));
-        for (const result of settled) {
-            if (result.status === 'rejected') {
-                warnings.push(`PR #${pr.number} (${pr.owner}/${pr.repo}) references an issue that could not be loaded: ${describeError(result.reason)}`);
-                continue;
-            }
+        for (const issueNumber of refs) {
             contributions.push({
                 owner: pr.owner,
                 repo: pr.repo,
                 prNumber: pr.number,
                 prAuthor: pr.author,
                 prTitle: pr.title,
-                issueNumber: result.value.issueNumber,
-                labels: result.value.labels,
+                issueNumber,
             });
         }
     }
     return { contributions, mergedPrCount: prs.length, warnings };
 }
 
-;// CONCATENATED MODULE: ./src/points.ts
+;// CONCATENATED MODULE: ./src/counts.ts
 
-/**
- * Points attribution.
- *
- * Label convention: a closed issue carries exactly one of `points:100`,
- * `points:150`, `points:200` (exact names). The lookup normalizes each label
- * once, here — trim + lowercase — so if a repo historically created
- * `Points:150` or `points: 150`, it is reconciled in this single place rather
- * than patched per repo. Points are attributed to the PR author (the PR closes
- * the issue, the PR author did the work), not the issue author, and are summed
- * across every repo in the org before shares are computed.
- */
-const POINTS_BY_LABEL = {
-    'points:100': 100,
-    'points:150': 150,
-    'points:200': 200,
-};
-function parsePointsLabel(label) {
-    return POINTS_BY_LABEL[label] ?? null;
-}
-function extractPointsLabel(labels) {
-    for (const raw of labels) {
-        const normalized = raw.trim().toLowerCase();
-        const points = parsePointsLabel(normalized);
-        if (points !== null)
-            return { label: normalized, points };
-    }
-    return null;
-}
-function attributePoints(contributions, registry) {
+function countIssuesByContributor(contributions, registry) {
     const totals = new Map();
-    const labelConflicts = [];
     for (const contribution of contributions) {
-        const matched = extractPointsLabel(contribution.labels);
-        if (matched === null)
-            continue; // no points label — nothing to attribute
-        const distinctPointsLabels = new Set(contribution.labels
-            .map((label) => label.trim().toLowerCase())
-            .filter((label) => parsePointsLabel(label) !== null));
-        if (distinctPointsLabels.size > 1) {
-            labelConflicts.push(`issue #${contribution.issueNumber} in ${contribution.owner}/${contribution.repo} ` +
-                `carries multiple points labels (${[...distinctPointsLabels].join(', ')}); ` +
-                `using '${matched.label}' — fix the issue's labels before the next cycle`);
-        }
+        // Distinctness is per (owner, repo, issueNumber) — issue numbers are only
+        // unique within a repo.
+        const issueKey = `${contribution.owner}/${contribution.repo}#${contribution.issueNumber}`;
         const entry = totals.get(contribution.prAuthor) ?? {
-            points: 0,
+            issues: new Set(),
             repos: new Set(),
         };
-        entry.points += matched.points;
+        entry.issues.add(issueKey);
         entry.repos.add(`${contribution.owner}/${contribution.repo}`);
         totals.set(contribution.prAuthor, entry);
     }
-    const pointsByGithub = new Map();
+    const countsByGithub = new Map();
     const unregistered = [];
-    for (const [handle, { points, repos }] of totals) {
+    for (const [handle, { issues, repos }] of totals) {
         const contributor = findContributor(registry, handle);
         if (contributor === undefined) {
-            unregistered.push({ github: handle, points, repos: [...repos] });
+            unregistered.push({ github: handle, issues: issues.size, repos: [...repos] });
             continue;
         }
-        const current = pointsByGithub.get(contributor.github) ?? 0;
-        pointsByGithub.set(contributor.github, current + points);
+        const current = countsByGithub.get(contributor.github) ?? 0;
+        countsByGithub.set(contributor.github, current + issues.size);
     }
-    return { pointsByGithub, unregistered, labelConflicts };
+    return { countsByGithub, unregistered };
 }
 
 ;// CONCATENATED MODULE: ./src/manifest.ts
@@ -103143,16 +103088,18 @@ function attributePoints(contributions, registry) {
 
 
 /**
- * Points -> payout computation. The formula is FROZEN (shared contract with
- * splitstream-core and splitstream-sdk-cli):
+ * Issue-count -> payout computation. The formula is FROZEN (shared contract
+ * with splitstream-core and splitstream-sdk-cli):
  *
- *   contributor_amount = floor(cycle_pool_amount * contributor_points / total_points_this_cycle)
+ *   contributor_amount = floor(cycle_pool_amount * contributor_issues_closed / total_issues_closed_this_cycle)
  *
- * `cycle_pool_amount` is an explicit workflow input in stroops (never
- * inferred). The integer-division remainder is never silently dropped and never
- * redistributed: it is recorded as `dustRemainder` and left in the vault for a
- * future reserve sweep. All monetary amounts are decimal strings end-to-end —
- * BigInt only at the point of use, never JS number.
+ * A qualifying issue is any issue closed via a merged PR containing a
+ * recognized closing keyword — no label of any kind is required. `cycle_pool_amount`
+ * is an explicit workflow input in stroops (never inferred). The
+ * integer-division remainder is never silently dropped and never redistributed:
+ * it is recorded as `dustRemainder` and left in the vault for a future reserve
+ * sweep. All monetary amounts are decimal strings end-to-end — BigInt only at
+ * the point of use, never JS number.
  */
 class ManifestError extends Error {
     constructor(message, options) {
@@ -103160,36 +103107,36 @@ class ManifestError extends Error {
         this.name = 'ManifestError';
     }
 }
-function computePayouts(pointsByGithub, registry, poolAmount) {
+function computePayouts(issuesByGithub, registry, poolAmount) {
     if (poolAmount <= 0n) {
         throw new ManifestError(`cycle_pool_amount must be a positive integer (stroops), got ${poolAmount}`);
     }
-    const totalPoints = [...pointsByGithub.values()].reduce((sum, points) => sum + points, 0);
-    if (totalPoints <= 0) {
-        throw new ManifestError('no points were attributed this cycle; refusing to compute a distribution over a zero-point cycle');
+    const totalIssuesClosed = [...issuesByGithub.values()].reduce((sum, count) => sum + count, 0);
+    if (totalIssuesClosed <= 0) {
+        throw new ManifestError('no issues were closed this cycle; refusing to compute a distribution over a zero-issue cycle');
     }
     const entries = [];
-    for (const [github, points] of pointsByGithub) {
+    for (const [github, issuesClosed] of issuesByGithub) {
         const contributor = findContributor(registry, github);
         if (contributor === undefined) {
-            // attributePoints() guarantees membership; reaching this is a bug, fail loudly.
-            throw new ManifestError(`internal error: contributor '${github}' has points but is missing from the registry`);
+            // countIssuesByContributor() guarantees membership; reaching this is a bug, fail loudly.
+            throw new ManifestError(`internal error: contributor '${github}' has closed issues but is missing from the registry`);
         }
-        const amount = (poolAmount * BigInt(points)) / BigInt(totalPoints); // floor
+        const amount = (poolAmount * BigInt(issuesClosed)) / BigInt(totalIssuesClosed); // floor
         entries.push({
             github: contributor.github,
             stellar: contributor.stellar,
-            points,
+            issuesClosed,
             amount: amount.toString(),
         });
     }
-    // Deterministic review order: most points first, then handle.
-    entries.sort((a, b) => b.points - a.points || a.github.localeCompare(b.github));
+    // Deterministic review order: most issues closed first, then handle.
+    entries.sort((a, b) => b.issuesClosed - a.issuesClosed || a.github.localeCompare(b.github));
     const totalDistributed = entries.reduce((sum, entry) => sum + BigInt(entry.amount), 0n);
     const dustRemainder = poolAmount - totalDistributed;
     return {
         entries,
-        totalPoints,
+        totalIssuesClosed,
         totalDistributed: totalDistributed.toString(),
         dustRemainder: dustRemainder.toString(),
     };
@@ -103259,7 +103206,7 @@ function buildManifest(opts) {
         cycleId: opts.cycleId,
         generatedAt: opts.generatedAt ?? new Date().toISOString(),
         poolAmount: opts.poolAmount,
-        totalPoints: opts.totalPoints,
+        totalIssuesClosed: opts.totalIssuesClosed,
         entries: opts.entries,
         dustRemainder: opts.dustRemainder,
         merkleRoot: opts.merkleRoot,
@@ -103633,8 +103580,11 @@ function describeRelayError(err) {
  *      (this repo's audit trail, the source of truth), or the `since` input for
  *      cycle 0 / dry runs. get_cycle_info is used only as a sanity check.
  *   3. Crawl merged PRs across every repo in the registry, resolve closing
- *      issues, attribute points to PR authors (summed across repos).
- *   4. Compute payouts (floor formula), dust remainder, Merkle root.
+ *      issues, count each contributor's distinct closed issues (summed across
+ *      repos). No labels are read — any issue closed via a merged PR with a
+ *      closing keyword qualifies.
+ *   4. Compute payouts (floor formula over issue counts), dust remainder,
+ *      Merkle root.
  *   5. Write the manifest to manifests/cycle-<id>.json as the audit trail.
  *   6. Unless dry-run: relay post_cycle_root via Soroban RPC and confirm it
  *      landed; print the tx to the job summary.
@@ -103753,30 +103703,28 @@ async function main() {
         }
         relayContext = { server, vault, keypair };
     }
-    // --- ingestion + points ---
+    // --- ingestion + issue counts ---
     const octokit = getOctokit(githubToken);
     const { contributions, mergedPrCount, warnings } = await ingestCycle(octokit, registry.repos, sinceIso);
     for (const warning of warnings)
         core_warning(warning);
     info(`ingested ${mergedPrCount} merged PR(s) in window; ${contributions.length} (PR, issue) contribution(s) with closing references`);
-    const { pointsByGithub, unregistered, labelConflicts } = attributePoints(contributions, registry);
-    for (const conflict of labelConflicts)
-        core_warning(conflict);
+    const { countsByGithub, unregistered } = countIssuesByContributor(contributions, registry);
     if (unregistered.length > 0) {
         core_warning(`unregistered PR authors are NOT paid this cycle; add them to ${configPath} before the next cycle:`);
         for (const entry of unregistered) {
-            core_warning(`  - ${entry.github}: ${entry.points} pts (${entry.repos.join(', ')})`);
+            core_warning(`  - ${entry.github}: ${entry.issues} issue(s) (${entry.repos.join(', ')})`);
         }
     }
-    info(`points attributed: ${[...pointsByGithub.entries()].map(([g, p]) => `${g}=${p}`).join(', ') || '(none)'}`);
+    info(`issues counted: ${[...countsByGithub.entries()].map(([g, c]) => `${g}=${c}`).join(', ') || '(none)'}`);
     // --- payouts + manifest + merkle ---
-    const payouts = computePayouts(pointsByGithub, registry, poolAmount);
+    const payouts = computePayouts(countsByGithub, registry, poolAmount);
     const merkle = buildMerkleRoot(payouts.entries.map((entry) => ({ stellar: entry.stellar, amount: BigInt(entry.amount) })));
     const merkleRootHex = merkle.root.toString('hex');
     const manifest = buildManifest({
         cycleId,
         poolAmount: poolAmount.toString(),
-        totalPoints: payouts.totalPoints,
+        totalIssuesClosed: payouts.totalIssuesClosed,
         entries: payouts.entries,
         dustRemainder: payouts.dustRemainder,
         merkleRoot: merkleRootHex,
@@ -103785,7 +103733,7 @@ async function main() {
     (0,external_node_fs_namespaceObject.mkdirSync)(manifestDir, { recursive: true });
     (0,external_node_fs_namespaceObject.writeFileSync)(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
     info(`wrote distribution manifest to ${manifestPath}`);
-    info(`pool=${manifest.poolAmount} stroops, totalPoints=${manifest.totalPoints}, ` +
+    info(`pool=${manifest.poolAmount} stroops, totalIssuesClosed=${manifest.totalIssuesClosed}, ` +
         `dustRemainder=${manifest.dustRemainder} stroops (left in vault), merkleRoot=${merkleRootHex}`);
     setOutput('cycle_id', String(cycleId));
     setOutput('manifest_path', manifestPath);
