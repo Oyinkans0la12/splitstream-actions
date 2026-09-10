@@ -1,4 +1,14 @@
-# splitstream-actions
+<p align="center">
+  <img src="assets/splitstream-banner.svg" alt="SplitStream banner" width="700" />
+</p>
+
+# SplitStream Actions
+
+![CI](https://github.com/Oyinkans0la12/splitstream-actions/actions/workflows/ci.yml/badge.svg)
+![Node](https://img.shields.io/badge/node-24-green)
+![License](https://img.shields.io/github/license/Oyinkans0la12/splitstream-actions)
+
+[Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
 The bridge that turns closed GitHub issues/PRs into a signed on-chain distribution
 manifest for [splitstream-core]. Runs as a GitHub Action on the Wave sprint
@@ -13,7 +23,13 @@ deployed splitstream-core contract via Soroban RPC.
 > settles at the org/treasury level — issues closed in **every repo listed in
 > `splitstream.yml`** are summed per contributor before shares are computed.
 
----
+## Deployed — Testnet
+
+| | |
+|---|---|
+| Vault contract (relay target) | `CCC2LP2LOYZOLA2JW4C4K7JMR3TRJZIKHDSQYSFJ3R3MCDJLVBT3PZOC` |
+| Explorer | https://stellar.expert/explorer/testnet/contract/CCC2LP2LOYZOLA2JW4C4K7JMR3TRJZIKHDSQYSFJ3R3MCDJLVBT3PZOC |
+| Network | Test SDF Network ; September 2015 (Testnet) |
 
 ## How it works
 
@@ -63,9 +79,11 @@ GITHUB_TOKEN / ORACLE_SECRET ┘                                                
 7. **Relay** — unless `dry_run`, builds and signs
    `post_cycle_root(cycle_id, root, total_amount)` with the oracle keypair,
    submits via Soroban RPC, **polls until the transaction lands**, and fails the
-   run if it doesn't. The tx hash + ledger are written to the job summary.
-   An optional `FEE_BUMP_SECRET_KEY` wraps the tx in a fee bump when the relay
-   account's own balance is a concern.
+   run if it doesn't. Before any RPC call, the configured secret is asserted to
+   resolve to the registry's `oracleAccount` — a mismatch fails loudly instead of
+   relaying from the wrong identity. The tx hash + ledger are written to the job
+   summary. An optional `FEE_BUMP_SECRET_KEY` wraps the tx in a fee bump when the
+   relay account's own balance is a concern.
 
 ## Configuration — `.github/splitstream.yml`
 
@@ -135,8 +153,9 @@ Outputs: `cycle_id`, `manifest_path`, `merkle_root`, `dust_remainder`, `dry_run`
 - `GITHUB_TOKEN` — Octokit auth (workflow supplies `secrets.GITHUB_TOKEN`).
 - `ORACLE_SECRET_KEY` — the relay/oracle keypair (S... secret). **Required unless
   `dry_run=true`. Never logged, never written to a file, never echoed in a debug
-  step.** This is the account that signs `post_cycle_root`; it must exist and be
-  funded on the target network.
+  step.** This is the account that signs `post_cycle_root`; it must exist, be
+  funded on the target network, and resolve to the registry's `oracleAccount`
+  (enforced before every relay).
 - `FEE_BUMP_SECRET_KEY` — optional; a second funded keypair used as the fee-bump
   source when the oracle's own XLM balance is a concern.
 
@@ -227,6 +246,7 @@ guess on any unexpected shape.
 npm install
 npm run check      # typecheck + unit tests + ncc build
 npm test           # unit tests only
+npm run test:integration  # gated testnet suite (skips unless gates are set)
 npm run typecheck
 npm run build      # ncc bundle -> dist/ (action runtime uses dist/index.js)
 ```
@@ -234,4 +254,51 @@ npm run build      # ncc bundle -> dist/ (action runtime uses dist/index.js)
 Testnet integration tests are gated behind env flags — see
 [CONTRIBUTING.md](CONTRIBUTING.md#testing).
 
-[splitstream-core]: https://github.com/your-org/splitstream-core
+## Contributing
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the
+build/test workflow and PR expectations, and [SECURITY.md](SECURITY.md) for
+the security model and responsible-disclosure process. Found a bug or have a
+feature idea? [Open an issue](https://github.com/Oyinkans0la12/splitstream-actions/issues).
+
+## Contributors
+
+[![Contributors](https://contrib.rocks/image?repo=Oyinkans0la12/splitstream-actions)](https://github.com/Oyinkans0la12/splitstream-actions/graphs/contributors)
+
+## License
+
+This project is licensed under the MIT License — see [LICENSE](./LICENSE) for details.
+
+## Community
+
+- 💬 **GitHub Issues** — bug reports, feature requests, and design discussion
+- 🔒 **Security** — report vulnerabilities privately per [SECURITY.md](SECURITY.md)
+- 📋 **Wave** — this repo participates in the
+  [Drips Stellar Wave](https://www.drips.network/wave/stellar)
+
+## Maintainers
+
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://github.com/Oyinkans0la12">
+        <img src="https://github.com/Oyinkans0la12.png" width="100" alt="Oyinkans0la12" />
+      </a>
+      <br />
+      <strong>Oyinkans0la12</strong>
+      <br />
+      Smart Contract Engineer
+      <br />
+      <a href="https://github.com/Oyinkans0la12">GitHub</a>
+    </td>
+    <td align="left">
+      <strong>Contact</strong>
+      <br />
+      <a href="https://github.com/Oyinkans0la12/splitstream-actions/issues">GitHub Issues</a> — primary channel for bugs, feature requests, and design discussion
+      <br />
+      🔒 For vulnerabilities, use a <a href="https://github.com/Oyinkans0la12/splitstream-actions/security/advisories/new">private security advisory</a> per SECURITY.md
+    </td>
+  </tr>
+</table>
+
+[splitstream-core]: https://github.com/Oyinkans0la12/splitstream-core

@@ -32,7 +32,11 @@ therefore limited to:
 4. The oracle account is a dedicated relay account — it should hold only the
    XLM needed to pay fees (plus a fee-bump source if used). Do not reuse
    treasury or maintainer keys.
-5. Rotate the oracle keypair if it is ever suspected of exposure, and update
+5. Before every relay, the action asserts that `ORACLE_SECRET_KEY` resolves to
+   the registry's `oracleAccount` and fails loudly on a mismatch — a wrong
+   secret or a stale registry can never silently sign with an unintended
+   identity (`relayCycleRoot` in `src/relay.ts`).
+6. Rotate the oracle keypair if it is ever suspected of exposure, and update
    `oracleAccount` in the registry in the same change.
 
 ## Reporting a vulnerability
