@@ -4,8 +4,11 @@ import { describeError } from './registry.js';
 
 /**
  * Ingestion layer: crawls every repo in the registry for PRs merged inside the
- * cycle window, resolves GitHub closing-keyword references to issues, and reads
- * the issues' labels so points can be attributed.
+ * cycle window and resolves GitHub closing-keyword references to the issues
+ * they closed. That is all — a qualifying issue is simply one closed via a
+ * merged PR containing a recognized closing keyword. No label of any kind is
+ * read or required: issue labels are informational only and play no role in
+ * payout math.
  *
  * The window is one shared boundary for the whole org — a contributor who
  * shipped work in two repos this cycle gets one combined amount, not two
@@ -13,9 +16,7 @@ import { describeError } from './registry.js';
  * is always resolved as the (owner, repo, issueNumber) triple.
  *
  * Every external call is wrapped with explicit error handling. API/network
- * failures abort the run (loud, via IngestError); an individual issue that
- * cannot be loaded (e.g. deleted) is reported as a warning and skipped — it is
- * never silently dropped.
+ * failures abort the run (loud, via IngestError).
  */
 
 export type Octokit = ReturnType<typeof getOctokit>;
@@ -45,7 +46,6 @@ export interface Contribution {
   prAuthor: string;
   prTitle: string;
   issueNumber: number;
-  labels: string[];
 }
 
 export interface IngestedCycle {
@@ -126,24 +126,6 @@ export async function findMergedPullRequests(
   return { prs, warnings };
 }
 
-export async function fetchIssueLabels(
-  octokit: Octokit,
-  owner: string,
-  repo: string,
-  issueNumber: number,
-): Promise<string[]> {
-  let data: { labels: Array<string | { name?: string }> };
-  try {
-    ({ data } = await octokit.rest.issues.get({ owner, repo, issue_number: issueNumber }));
-  } catch (err) {
-    throw new IngestError(
-      `failed to load issue #${issueNumber} in ${owner}/${repo}: ${describeError(err)}`,
-      { cause: err },
-    );
-  }
-  return data.labels.map((label) => (typeof label === 'string' ? label : (label.name ?? ''))).filter((name) => name !== '');
-}
-
 export async function ingestCycle(
   octokit: Octokit,
   repos: RepoRef[],
@@ -154,31 +136,14 @@ export async function ingestCycle(
   const contributions: Contribution[] = [];
   for (const pr of prs) {
     const refs = extractClosingIssueRefs(pr.body);
-    if (refs.length === 0) continue;
-
-    const settled = await Promise.allSettled(
-      refs.map((issueNumber) =>
-        fetchIssueLabels(octokit, pr.owner, pr.repo, issueNumber).then(
-          (labels) => ({ issueNumber, labels }),
-        ),
-      ),
-    );
-
-    for (const result of settled) {
-      if (result.status === 'rejected') {
-        warnings.push(
-          `PR #${pr.number} (${pr.owner}/${pr.repo}) references an issue that could not be loaded: ${describeError(result.reason)}`,
-        );
-        continue;
-      }
+    for (const issueNumber of refs) {
       contributions.push({
         owner: pr.owner,
         repo: pr.repo,
         prNumber: pr.number,
         prAuthor: pr.author,
         prTitle: pr.title,
-        issueNumber: result.value.issueNumber,
-        labels: result.value.labels,
+        issueNumber,
       });
     }
   }
