@@ -69,7 +69,7 @@ export const splitstreamConfigSchema = z
     version: z.literal(1, { error: 'version must be 1' }),
     repos: z
       .array(repoSchema)
-      .min(1, 'repos must not be empty — at least one repo must contribute points')
+      .min(1, 'repos must not be empty — at least one repo must contribute issues')
       .superRefine((repos, ctx) => {
         const seen = new Set<string>();
         repos.forEach((repo, i) => {

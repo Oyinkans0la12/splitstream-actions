@@ -17,16 +17,16 @@ chore(scaffold): initialize action.yml, package.json, tsconfig
 feat(schema): add zod schema for splitstream.yml
 feat(registry): load and validate contributor registry
 feat(ingest): fetch merged PRs and extract closing issue references
-feat(points): parse points labels and attribute points per contributor
+feat(counts): count distinct issues closed per contributor
 feat(manifest): compute payout amounts and dust remainder
 feat(merkle): leaf hashing matching splitstream-core
 test(merkle): cross-language golden test against splitstream-core fixture
 feat(merkle): sorted-pair tree construction and root computation
 feat(relay): build and submit post_cycle_root via Soroban RPC
 feat(workflow): wire wave-cycle-close.yml schedule trigger
-test: schema validator unit tests (100-pt issue)
-test: PR/points parser unit tests (150-pt issue)
-test: end-to-end testnet relay integration test (200-pt issue, gated)
+test: schema validator unit tests
+test: counts and manifest payout-formula unit tests
+test: end-to-end testnet relay integration test (gated)
 docs: add README, CONTRIBUTING, SECURITY
 ```
 
@@ -47,8 +47,8 @@ docs: add README, CONTRIBUTING, SECURITY
 ```
 src/index.ts                 orchestrator (inputs -> pipeline -> relay)
 src/registry.ts              loads + validates splitstream.yml
-src/ingest.ts                Octokit: merged PRs, closing refs, issue labels
-src/points.ts                label -> points, cross-repo attribution
+src/ingest.ts                Octokit: merged PRs + closing refs (no label reading)
+src/counts.ts                distinct closed issues per contributor
 src/manifest.ts              floor payout formula + dust remainder + manifest
 src/merkle.ts                leaf XDR hashing + sorted-pair tree
 src/relay.ts                 Soroban RPC: cycle query, build/sign/submit/confirm
@@ -62,7 +62,7 @@ npm run typecheck   # strict TS, no implicit any
 npm test            # vitest — unit tests always run
 ```
 
-Unit suites: `registry`, `points`, `manifest`, `merkle` (golden), `ingest`.
+Unit suites: `registry`, `counts`, `manifest`, `merkle` (golden), `ingest`.
 
 ### Testnet integration tests (gated)
 
