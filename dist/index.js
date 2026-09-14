@@ -102998,6 +102998,17 @@ function extractClosingIssueRefs(body) {
 async function findMergedPullRequests(octokit, repos, sinceIso) {
     const prs = [];
     const warnings = [];
+    // The window is half-open — [since, now) — and the boundary is decided on
+    // parsed epochs, never on the raw strings. `since` is operator-supplied and is
+    // only validated through Date.parse, which accepts shapes (a "+02:00" offset,
+    // a date-only value) that do not sort lexicographically alongside GitHub's
+    // canonical `YYYY-MM-DDTHH:MM:SSZ` merged_at values. Comparing them as strings
+    // silently drops in-window PRs, which understates totalIssuesClosed and so
+    // overpays every contributor in the cycle.
+    const sinceMs = Date.parse(sinceIso);
+    if (Number.isNaN(sinceMs)) {
+        throw new IngestError(`cycle window boundary is not a valid ISO 8601 timestamp: '${sinceIso}'`);
+    }
     for (const { owner, name: repo } of repos) {
         let results;
         try {
@@ -103014,8 +103025,13 @@ async function findMergedPullRequests(octokit, repos, sinceIso) {
         for (const pr of results) {
             if (pr.merged_at === null)
                 continue; // closed without merging
-            if (pr.merged_at < sinceIso)
-                continue; // outside this cycle's window
+            const mergedAtMs = Date.parse(pr.merged_at);
+            if (Number.isNaN(mergedAtMs)) {
+                warnings.push(`PR #${pr.number} in ${owner}/${repo} has an unparseable merged_at '${pr.merged_at}'; skipped`);
+                continue;
+            }
+            if (mergedAtMs < sinceMs)
+                continue; // outside this cycle's window (half-open: the boundary is included)
             const author = pr.user?.login;
             if (author === undefined || author === '') {
                 warnings.push(`PR #${pr.number} in ${owner}/${repo} has no author; skipped`);
