@@ -4,32 +4,102 @@
 
 # SplitStream Actions
 
+**Closes a Wave sprint cycle and puts contributor payouts on-chain — computed from GitHub, relayed to Stellar, in one workflow run.**
+
 ![CI](https://github.com/Oyinkans0la12/splitstream-actions/actions/workflows/ci.yml/badge.svg)
 ![Node](https://img.shields.io/badge/node-24-green)
+![Network](https://img.shields.io/badge/network-testnet-orange)
 ![License](https://img.shields.io/github/license/Oyinkans0la12/splitstream-actions)
 
-[Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
+[Testnet Explorer](https://stellar.expert/explorer/testnet/contract/CCC2LP2LOYZOLA2JW4C4K7JMR3TRJZIKHDSQYSFJ3R3MCDJLVBT3PZOC) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
-The bridge that turns closed GitHub issues/PRs into a signed on-chain distribution
-manifest for [splitstream-core]. Runs as a GitHub Action on the Wave sprint
-boundary (weekly schedule) or manually. **This repo never holds funds** — it only
-computes and relays: it reads a contributor registry, crawls merged PRs, counts
-the issues they closed, computes each contributor's share of the cycle pool,
-builds a Merkle tree over the payout leaves, and relays the resulting root to the
-deployed splitstream-core contract via Soroban RPC.
+For a maintainer, one run of this action does the whole weekly close-out. It
+crawls the merged PRs from the cycle window across every repo in your registry,
+counts the issues each contributor closed, computes each contributor's share of
+the cycle pool with a frozen integer-only formula, writes the result as a
+distribution manifest committed to the repo as an audit trail, and relays the
+Merkle root of those payouts to the deployed [splitstream-core] contract.
+
+It runs as a GitHub Action on the Wave sprint boundary (weekly schedule) or
+manually. **This repo never holds funds** — it only computes and relays.
+Contributors then claim their share against that root with [splitstream-sdk-cli].
 
 > Org-level settlement: a maintainer's Wave-approved work is often spread across
 > several repos under the same org (core contracts + app + tooling). SplitStream
 > settles at the org/treasury level — issues closed in **every repo listed in
 > `splitstream.yml`** are summed per contributor before shares are computed.
 
-## Deployed — Testnet
+> **Part of SplitStream** — this repo is one of three: [splitstream-core] (the
+> Soroban vault contract the root is relayed to), **splitstream-actions** (this
+> repo, the GitHub→chain bridge), and [splitstream-sdk-cli] (the client SDK and
+> CLI that reads the manifests this action writes).
 
-| | |
-|---|---|
-| Vault contract (relay target) | `CCC2LP2LOYZOLA2JW4C4K7JMR3TRJZIKHDSQYSFJ3R3MCDJLVBT3PZOC` |
-| Explorer | https://stellar.expert/explorer/testnet/contract/CCC2LP2LOYZOLA2JW4C4K7JMR3TRJZIKHDSQYSFJ3R3MCDJLVBT3PZOC |
-| Network | Test SDF Network ; September 2015 (Testnet) |
+---
+
+## Quick start
+
+Three things must exist in the repo that runs the cycle:
+
+1. **A registry** at `.github/splitstream.yml`. This file **must exist in the
+   repo running the action** — it is read from the job's working directory
+   (`config_path` defaults to `.github/splitstream.yml`), not from any of the
+   repos it lists. If it is missing, the run fails validation before doing
+   anything else. This is the most common setup mistake; see
+   [Configuration](#configuration--githubsplitstreamyml) for the shape.
+2. **The workflow**, invoking this action with a pool amount.
+3. **Secrets and variables** — `ORACLE_SECRET_KEY` (a repository **secret**) and,
+   for scheduled runs, `CYCLE_POOL_AMOUNT` (a repository **variable**).
+
+```yaml
+- uses: actions/checkout@v4
+- uses: Oyinkans0la12/splitstream-actions@main
+  with:
+    cycle_pool_amount: ${{ vars.CYCLE_POOL_AMOUNT }}   # required; stroops, as a string
+    cycle_id: ${{ vars.CYCLE_ID }}                     # only needed for cycle 0
+  env:
+    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    ORACLE_SECRET_KEY: ${{ secrets.ORACLE_SECRET_KEY }} # required unless dry_run
+```
+
+The working example is this repo's own
+[`.github/workflows/wave-cycle-close.yml`](.github/workflows/wave-cycle-close.yml):
+weekly `schedule` plus `workflow_dispatch`, with `CYCLE_POOL_AMOUNT` and
+`CYCLE_ID` read from repository variables on the scheduled path. Set
+`CYCLE_POOL_AMOUNT` under Settings → Secrets and variables → Actions → Variables
+**before** the first scheduled run, or the run has no pool to distribute.
+
+Pass `dry_run: true` for a first run — it computes the manifest, dust remainder
+and Merkle root while skipping every ledger query and the relay.
+
+## The count-based payout rule
+
+The single most important behavioural fact about this action. It is frozen, and
+it is the exact rule [splitstream-sdk-cli] mirrors when it re-simulates a cycle.
+
+**Any issue closed via a merged PR containing a recognized closing keyword
+(`Closes #N` / `Fixes #N` / `Resolves #N`, case-insensitive) in one of the
+tracked repos, inside the cycle window.** That is the whole rule.
+
+- **No label of any kind is read.** Complexity, type, size and `points:*` labels
+  are informational only and play no part in payout math.
+- Every qualifying issue counts equally — **one issue, one share** of the pool
+  denominator. Nothing weights an issue by difficulty.
+- Each distinct issue closed by a contributor's PRs increments their count
+  exactly once, and counts are summed across every repo in the registry before
+  shares are computed.
+- Credit is attributed to the **PR author** (the PR closes the issue, the PR
+  author did the work), not the issue author. PR authors missing from the
+  registry are never paid; they are reported loudly so they can be added before
+  the next cycle.
+
+The formula, applied in BigInt, never JS number:
+
+```
+contributor_amount = floor(cycle_pool_amount * contributor_issues_closed / total_issues_closed_this_cycle)
+```
+
+The integer-division remainder is recorded as `dustRemainder` in the manifest
+and left in the vault — never silently dropped, never auto-redistributed.
 
 ## How it works
 
@@ -52,31 +122,19 @@ GITHUB_TOKEN / ORACLE_SECRET ┘                                                
    For cycle 0 (no committed manifest) and dry runs, the `since` input supplies
    the boundary. One shared window for the whole org.
 3. **Ingest** — for every repo in the registry, crawls merged PRs inside the
-   window and matches GitHub closing keywords (`Closes/Fixes/Resolves #N`) in
-   PR bodies. Issue numbers are always resolved as owner/repo/issueNumber —
-   numbers are only unique per repo. **No label of any kind is read:** a
-   qualifying issue is simply one closed via a merged PR with a recognized
-   closing keyword.
-4. **Counts** — each distinct issue closed by a contributor's PR increments
-   that contributor's count exactly once, summed across all repos. Complexity
-   or type labels on issues are informational only and play no role in payout
-   math.
-5. **Payouts** — the frozen formula, applied in BigInt, never JS number:
-
-   ```
-   contributor_amount = floor(cycle_pool_amount * contributor_issues_closed / total_issues_closed_this_cycle)
-   ```
-
-   The integer-division remainder is recorded as `dustRemainder` in the manifest
-   and left in the vault — never silently dropped, never auto-redistributed.
-6. **Manifest + Merkle** — the distribution manifest is written to
+   window and matches GitHub closing keywords in PR bodies. Issue numbers are
+   always resolved as owner/repo/issueNumber — numbers are only unique per repo.
+4. **Payouts** — the
+   [count-based payout rule](#the-count-based-payout-rule) is applied per
+   contributor. The leaf format is unchanged by that formula: the contract only
+   ever verifies `(address, amount)` pairs, so the formula never enters the leaf.
+5. **Manifest + Merkle** — the distribution manifest is written to
    `manifests/cycle-<id>.json` **before** any relay, so the on-chain root is
    always independently reproducible from a file in git history. The Merkle
    leaves are `sha256(Address XDR || i128 XDR)` — byte-identical to
-   splitstream-core's `merkle::leaf_hash` (see [Merkle leaf](#merkle-leaf-format)).
-   The leaf format is unchanged by the count-based formula: the contract only
-   ever verifies `(address, amount)` pairs — the formula never enters the leaf.
-7. **Relay** — unless `dry_run`, builds and signs
+   splitstream-core's `merkle::leaf_hash` (see
+   [Merkle leaf format](#merkle-leaf-format)).
+6. **Relay** — unless `dry_run`, builds and signs
    `post_cycle_root(cycle_id, root, total_amount)` with the oracle keypair,
    submits via Soroban RPC, **polls until the transaction lands**, and fails the
    run if it doesn't. Before any RPC call, the configured secret is asserted to
@@ -87,8 +145,9 @@ GITHUB_TOKEN / ORACLE_SECRET ┘                                                
 
 ## Configuration — `.github/splitstream.yml`
 
-The registry typically lives in the org's treasury repo (or whichever repo runs
-the scheduled workflow). This repo validates it against the strict zod schema in
+The registry must be present in the repo that runs the action — normally the
+org's treasury repo, whichever repo runs the scheduled workflow (see
+[Quick start](#quick-start)). It is validated against the strict zod schema in
 [`schemas/splitstream.schema.ts`](schemas/splitstream.schema.ts):
 
 ```yaml
@@ -117,20 +176,24 @@ duplicate repos are rejected, `repos`/`contributors` must be non-empty,
 `vaultContract` is required, `network` must be `testnet`|`mainnet`, and unknown
 top-level keys are rejected so typos like `vaultContractt` cannot pass silently.
 
-### What counts as a qualifying issue
+`vaultContract` and `tokenContract` must match the ids under
+[Deployed — Testnet](#deployed--testnet), and `oracleAccount` must be the
+account that `ORACLE_SECRET_KEY` signs for.
 
-**Any issue closed via a merged PR containing a recognized closing keyword
-(`Closes #N` / `Fixes #N` / `Resolves #N`, case-insensitive) in one of the
-tracked repos, inside the cycle window.** That is the whole rule. No label of
-any kind is required for an issue to count, and every qualifying issue counts
-equally — one issue, one share of the pool denominator. Labels like
-`bug`/`enhancement`/`docs` are informational only and are never read by this
-action.
+## Workflow
 
-Credit is attributed to the **PR author** (the PR closes the issue, the PR
-author did the work), not the issue author. PR authors missing from the
-registry are never paid; they are reported loudly so they can be added before
-the next cycle.
+[`.github/workflows/wave-cycle-close.yml`](.github/workflows/wave-cycle-close.yml)
+runs the action weekly (`schedule`) or via `workflow_dispatch`. For schedule runs,
+per-cycle configuration comes from repo variables:
+
+- `CYCLE_POOL_AMOUNT` — required; the pool for that week's cycle, in stroops.
+- `CYCLE_ID` — only needed for cycle 0; subsequent ids come from the committed
+  `manifests/` audit trail (last committed cycle + 1).
+
+The workflow commits the generated manifest (`manifests/cycle-<id>.json`) as the
+audit trail and pushes it — the on-chain root must always be reproducible from
+git history. Manual runs can pass `dry_run: true` to self-test without touching
+the chain.
 
 ## Action inputs & outputs
 
@@ -159,24 +222,9 @@ Outputs: `cycle_id`, `manifest_path`, `merkle_root`, `dust_remainder`, `dry_run`
 - `FEE_BUMP_SECRET_KEY` — optional; a second funded keypair used as the fee-bump
   source when the oracle's own XLM balance is a concern.
 
-## Workflow
-
-[`.github/workflows/wave-cycle-close.yml`](.github/workflows/wave-cycle-close.yml)
-runs the action weekly (`schedule`) or via `workflow_dispatch`. For schedule runs,
-per-cycle configuration comes from repo variables:
-
-- `CYCLE_POOL_AMOUNT` — required; the pool for that week's cycle, in stroops.
-- `CYCLE_ID` — only needed for cycle 0; subsequent ids come from the committed
-  `manifests/` audit trail (last committed cycle + 1).
-
-The workflow commits the generated manifest (`manifests/cycle-<id>.json`) as the
-audit trail and pushes it — the on-chain root must always be reproducible from
-git history. Manual runs can pass `dry_run: true` to self-test without touching
-the chain.
-
 ## Manifest format
 
-Shared contract with splitstream-sdk-cli:
+The action is the **producer** of this format; [splitstream-sdk-cli] consumes it.
 
 ```json
 {
@@ -240,6 +288,14 @@ If the deployed contract's field types/order differ, adjust `parseCycleInfo`
 there — it is the only place that decodes the reply, and it throws rather than
 guess on any unexpected shape.
 
+## Deployed — Testnet
+
+| | |
+|---|---|
+| Vault contract (relay target) | `CCC2LP2LOYZOLA2JW4C4K7JMR3TRJZIKHDSQYSFJ3R3MCDJLVBT3PZOC` |
+| Explorer | https://stellar.expert/explorer/testnet/contract/CCC2LP2LOYZOLA2JW4C4K7JMR3TRJZIKHDSQYSFJ3R3MCDJLVBT3PZOC |
+| Network | Test SDF Network ; September 2015 (Testnet) |
+
 ## Development
 
 ```bash
@@ -264,10 +320,6 @@ feature idea? [Open an issue](https://github.com/Oyinkans0la12/splitstream-actio
 ## Contributors
 
 [![Contributors](https://contrib.rocks/image?repo=Oyinkans0la12/splitstream-actions)](https://github.com/Oyinkans0la12/splitstream-actions/graphs/contributors)
-
-## License
-
-This project is licensed under the MIT License — see [LICENSE](./LICENSE) for details.
 
 ## Community
 
@@ -301,4 +353,9 @@ This project is licensed under the MIT License — see [LICENSE](./LICENSE) for 
   </tr>
 </table>
 
+## License
+
+This project is licensed under the MIT License — see [LICENSE](./LICENSE) for details.
+
 [splitstream-core]: https://github.com/Oyinkans0la12/splitstream-core
+[splitstream-sdk-cli]: https://github.com/Oyinkans0la12/splitstream-sdk-cli
