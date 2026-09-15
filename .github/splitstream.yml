@@ -1,0 +1,15 @@
+version: 1
+repos:
+  - owner: Oyinkans0la12
+    name: splitstream-core
+  - owner: Oyinkans0la12
+    name: splitstream-actions
+  - owner: Oyinkans0la12
+    name: splitstream-sdk-cli
+contributors:
+  - github: Oyinkans0la12
+    stellar: GAF3NBUHDWKTWLQLYDWED7W4T7N75HDIYC4SLVABBRNUSY2GKN25Y3GD
+oracleAccount: GCVR3V7IUSSNUS42XW7V7KJ2FW3XJZPKPI2YSC6JYGJNKDERNNMKNSX7
+tokenContract: CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC
+vaultContract: CCC2LP2LOYZOLA2JW4C4K7JMR3TRJZIKHDSQYSFJ3R3MCDJLVBT3PZOC
+network: testnet
