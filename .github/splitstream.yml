@@ -9,7 +9,9 @@ repos:
 contributors:
   - github: Oyinkans0la12
     stellar: GAF3NBUHDWKTWLQLYDWED7W4T7N75HDIYC4SLVABBRNUSY2GKN25Y3GD
-oracleAccount: GCVR3V7IUSSNUS42XW7V7KJ2FW3XJZPKPI2YSC6JYGJNKDERNNMKNSX7
+# Must equal the oracle fixed at the vault's initialize(), which has no setter —
+# read it from the deployed contract's instance storage, never from a fresh key.
+oracleAccount: GBU2Q6BOD5WHRVTVLIYL4UQEFSSGS4DJOLAG23JRX52TILGQZM5HTHOJ
 tokenContract: CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC
 vaultContract: CCC2LP2LOYZOLA2JW4C4K7JMR3TRJZIKHDSQYSFJ3R3MCDJLVBT3PZOC
 network: testnet
