@@ -36,6 +36,19 @@ jobs:
   close-cycle:
     runs-on: ubuntu-latest
     steps:
+      # Fail fast with an actionable message. Without this, an unset
+      # CYCLE_POOL_AMOUNT surfaces as the opaque platform error "Input required
+      # and not supplied: cycle_pool_amount". Only the schedule path needs the
+      # guard — workflow_dispatch already takes cycle_pool_amount as an
+      # explicit input.
+      - name: Validate required cycle variables are set
+        if: github.event_name == 'schedule'
+        run: |
+          if [ -z "${{ vars.CYCLE_POOL_AMOUNT }}" ]; then
+            echo "::error::CYCLE_POOL_AMOUNT repo variable is not set. Set it in Settings → Secrets and variables → Actions → Variables before the scheduled cycle can run."
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
 

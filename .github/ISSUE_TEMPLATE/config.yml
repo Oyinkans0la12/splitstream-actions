@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security Vulnerability Report
+    url: https://github.com/Oyinkans0la12/splitstream-actions/blob/main/SECURITY.md
+    about: Please review our security policy and report vulnerabilities privately.

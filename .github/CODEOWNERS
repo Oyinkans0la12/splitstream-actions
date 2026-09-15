@@ -1,0 +1,3 @@
+# Critical protocol-level files affecting splitstream-core compatibility
+/src/merkle.ts @Oyinkans0la12
+/schemas/ @Oyinkans0la12
