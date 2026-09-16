@@ -1,0 +1,17 @@
+# GitBook Site Git Sync configuration for Oyinkans0la12/splitstream-actions.
+# One space for the repo's documentation directory (docs/). No sections: a site
+# with sections cannot also list spaces at the top level, and there is only one
+# content directory here for a section to hold.
+$schema: https://api.gitbook.com/gitbook-docs.yaml
+version: 1
+site:
+  title: SplitStream Actions
+  structure:
+    - type: space
+      key: space-docs
+      title: Documentation
+      path: docs
+      default: true
+      content:
+        directory: ./docs
+        language: en
