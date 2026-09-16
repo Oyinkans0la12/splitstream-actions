@@ -131,4 +131,4 @@ value) that do not sort lexicographically next to GitHub's canonical
 strings would silently drop in-window PRs, which understates
 `totalIssuesClosed` and so overpays every contributor in the cycle.
 
-[splitstream-sdk-cli]: https://github.com/Oyinkans0la12/splitstream-sdk-cli
+[splitstream-sdk-cli]: https://splitstream.gitbook.io/splitstream-sdk-cli/
