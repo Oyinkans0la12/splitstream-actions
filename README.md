@@ -11,7 +11,7 @@
 ![Network](https://img.shields.io/badge/network-testnet-orange)
 ![License](https://img.shields.io/github/license/Oyinkans0la12/splitstream-actions)
 
-[Testnet Explorer](https://stellar.expert/explorer/testnet/contract/CCC2LP2LOYZOLA2JW4C4K7JMR3TRJZIKHDSQYSFJ3R3MCDJLVBT3PZOC) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
+[Docs](https://splitstream.gitbook.io/splitstream-actions/) · [Testnet Explorer](https://stellar.expert/explorer/testnet/contract/CCC2LP2LOYZOLA2JW4C4K7JMR3TRJZIKHDSQYSFJ3R3MCDJLVBT3PZOC) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
 For a maintainer, one run of this action does the whole weekly close-out. It
 crawls the merged PRs from the cycle window across every repo in your registry,
