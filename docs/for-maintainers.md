@@ -101,12 +101,15 @@ undetectable until someone fails to claim.
 
 ### `oracleAccount` must match what is deployed
 
-This is a property of the deployment, not of this file. The value here must be
-the account the deployed vault recognizes as its oracle; this repo can only
-report a mismatch (it refuses to relay), never resolve one. Changing the vault's
-oracle means changing it on splitstream-core's side first — see that repo's
-contract reference for how the oracle is configured — and updating this registry
-in the same change. Rotating the keypair follows the same rule: new secret, new
+This is a property of the deployment, not of this file. The vault fixes its
+oracle at `initialize()` and exposes no setter, so the account in instance
+storage is the only one `post_cycle_root` will accept; this repo can only report
+a mismatch (it refuses to relay), never resolve one. Changing the vault's oracle
+means changing it on splitstream-core's side first — see that repo's contract
+reference for how the oracle is configured — and updating this registry in the
+same change. This repo has already been burned by getting it wrong once; see the
+`fix(config)` commit that repointed `oracleAccount` at the deployed vault's
+on-chain oracle. Rotating the keypair follows the same rule: new secret, new
 `oracleAccount`, one change, never a half-applied rotation.
 
 ## Running a dry run first
