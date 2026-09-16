@@ -1,0 +1,65 @@
+name: Integration Check (testnet)
+
+# Manual only — never scheduled, never on push. The read-only suite talks to a
+# live Soroban RPC endpoint, and the submit suite is state-changing on testnet.
+# Point this at a throwaway vault, never the org treasury vault that
+# wave-cycle-close.yml relays to.
+on:
+  workflow_dispatch:
+    inputs:
+      run_submit:
+        description: >-
+          Also run the state-changing submit test. It posts a real
+          post_cycle_root with the deliberately absurd cycle id 999999, so it
+          can never collide with a real cycle. Throwaway vaults only.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      # Fail fast with an actionable message. Without this, the suite's gates
+      # are simply unmet and every test skips — a green run that verified
+      # nothing, which is worse than a red one.
+      - name: Validate integration gates are configured
+        run: |
+          missing=""
+          if [ -z "${{ vars.SOROBAN_RPC_URL }}" ]; then
+            missing="$missing SOROBAN_RPC_URL"
+          fi
+          if [ -z "${{ vars.SPLITSTREAM_VAULT_CONTRACT }}" ]; then
+            missing="$missing SPLITSTREAM_VAULT_CONTRACT"
+          fi
+          if [ -z "${{ secrets.ORACLE_SECRET_KEY }}" ]; then
+            missing="$missing ORACLE_SECRET_KEY"
+          fi
+          if [ -n "$missing" ]; then
+            echo "::error::gated integration tests would silently skip — unset:$missing. Set SOROBAN_RPC_URL and SPLITSTREAM_VAULT_CONTRACT as repository variables and ORACLE_SECRET_KEY as a repository secret."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run gated testnet integration tests
+        env:
+          RUN_RELAY_INTEGRATION: "1"
+          RUN_RELAY_SUBMIT: ${{ inputs.run_submit && '1' || '0' }}
+          SOROBAN_RPC_URL: ${{ vars.SOROBAN_RPC_URL }}
+          SPLITSTREAM_VAULT_CONTRACT: ${{ vars.SPLITSTREAM_VAULT_CONTRACT }}
+          # Throwaway relay keypair. Never reuse the production oracle secret here.
+          ORACLE_SECRET_KEY: ${{ secrets.ORACLE_SECRET_KEY }}
+        run: npm run test:integration
