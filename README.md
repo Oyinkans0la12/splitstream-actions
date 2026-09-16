@@ -328,6 +328,11 @@ feature idea? [Open an issue](https://github.com/Oyinkans0la12/splitstream-actio
 - 📋 **Wave** — this repo participates in the
   [Drips Stellar Wave](https://www.drips.network/wave/stellar)
 
+## Socials
+
+- 💬 **Discord** — [join the server](https://discord.gg/DzSUheDtQ)
+- ✈️ **Telegram** — [join the group](https://t.me/+zOMeL6fD6uY1ODhk)
+
 ## Maintainers
 
 <table>
