@@ -21,7 +21,7 @@ distribute.
 
 ## Triggering a cycle
 
-`.github/workflows/wave-cycle-close.yml` has two entry points.
+`.github/workflows/cycle-close.yml` has two entry points.
 
 **`schedule`** — `cron: "0 0 * * 1"`, Monday 00:00 UTC. Adjust it to your org's
 sprint day. Per-cycle values come from variables: `cycle_pool_amount` from

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import process from 'node:process';
 import { Contract, Keypair, nativeToScVal, rpc, xdr } from '@stellar/stellar-sdk';
 import {
   ledgerCloseTime,

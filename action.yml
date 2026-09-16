@@ -1,6 +1,6 @@
-name: "SplitStream Wave Cycle Close"
+name: "SplitStream Cycle Close"
 description: >-
-  Compute the on-chain distribution manifest for a closed Wave sprint cycle
+  Compute the on-chain distribution manifest for a closed contributor sprint cycle
   (issues closed by merged PRs across the org, Merkle root over payout leaves)
   and relay the root to the deployed splitstream-core contract via Soroban
   RPC. This action never holds funds — it only computes and relays.
@@ -9,7 +9,7 @@ inputs:
   cycle_pool_amount:
     description: >-
       The cycle pool to distribute, in stroops, as a string. Explicitly set by
-      the maintainer per cycle (e.g. the Wave payout actually received that
+      the maintainer per cycle (e.g. the contributor payout actually received that
       week). Never inferred.
     required: true
   cycle_id:

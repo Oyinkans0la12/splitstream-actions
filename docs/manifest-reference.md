@@ -101,7 +101,7 @@ for how to re-verify it against splitstream-core's Rust implementation.
 ## Where manifests live, and why the newest one is the source of truth
 
 Committed manifests are `manifests/cycle-<id>.json`. The workflow's
-`wave-cycle-close.yml` commits the generated file as the audit trail.
+`cycle-close.yml` commits the generated file as the audit trail.
 
 `readLastManifestWindow()` (`src/manifest.ts`) scans that directory for files
 matching `^cycle-(\d+)\.json$`, takes the highest id, and returns its

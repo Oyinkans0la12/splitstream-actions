@@ -23,7 +23,7 @@ feat(merkle): leaf hashing matching splitstream-core
 test(merkle): cross-language golden test against splitstream-core fixture
 feat(merkle): sorted-pair tree construction and root computation
 feat(relay): build and submit post_cycle_root via Soroban RPC
-feat(workflow): wire wave-cycle-close.yml schedule trigger
+feat(workflow): wire cycle-close.yml schedule trigger
 test: schema validator unit tests
 test: counts and manifest payout-formula unit tests
 test: end-to-end testnet relay integration test (gated)

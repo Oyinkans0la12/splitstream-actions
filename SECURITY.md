@@ -17,7 +17,7 @@ therefore limited to:
 - **Spurious GitHub API usage / data exposure** — the action reads PR/issue
   data across the org's repos with `GITHUB_TOKEN`. A compromised token leaks
   only what the workflow's `permissions` block allows (see
-  `.github/workflows/wave-cycle-close.yml` — `contents: write`, issues/pulls
+  `.github/workflows/cycle-close.yml` — `contents: write`, issues/pulls
   read; tighten further if possible).
 
 ## Secret handling — hard rules

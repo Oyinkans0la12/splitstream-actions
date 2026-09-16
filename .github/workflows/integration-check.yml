@@ -3,7 +3,7 @@ name: Integration Check (testnet)
 # Manual only — never scheduled, never on push. The read-only suite talks to a
 # live Soroban RPC endpoint, and the submit suite is state-changing on testnet.
 # Point this at a throwaway vault, never the org treasury vault that
-# wave-cycle-close.yml relays to.
+# cycle-close.yml relays to.
 on:
   workflow_dispatch:
     inputs:

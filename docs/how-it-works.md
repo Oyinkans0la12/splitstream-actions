@@ -97,7 +97,7 @@ One cycle covers every repo listed in the registry's `repos` list, not just the
 repo the workflow runs in. The window is one shared boundary for the whole org:
 a contributor who closed issues in splitstream-core and splitstream-sdk-cli this
 cycle gets **one** combined amount and **one** Merkle leaf, not two claims. This
-is what makes org-level settlement work — a maintainer's Wave-approved work is
+is what makes org-level settlement work — an open-source team's approved work is
 usually spread across several repos under the same owner.
 
 Set `repos` to exactly the repos whose merged PRs should pay out of this

@@ -85694,6 +85694,18 @@ function includes(array, value) {
 /******/ /* webpack/runtime/asset-relocator-loader */
 /******/ if (typeof __nccwpck_require__ !== 'undefined') __nccwpck_require__.ab = decodeURIComponent(new URL('.', import.meta.url).pathname).slice(import.meta.url.match(/^file:\/\/\/\w:/) ? 1 : 0, -1) + "/";
 /******/ 
+/******/ /* webpack/runtime/compat get default export */
+/******/ (() => {
+/******/ 	// getDefaultExport function for compatibility with non-harmony modules
+/******/ 	__nccwpck_require__.n = (module) => {
+/******/ 		var getter = module && module.__esModule ?
+/******/ 			() => (module['default']) :
+/******/ 			() => (module);
+/******/ 		__nccwpck_require__.d(getter, { a: getter });
+/******/ 		return getter;
+/******/ 	};
+/******/ })();
+/******/ 
 /******/ /* webpack/runtime/define property getters */
 /******/ (() => {
 /******/ 	// define getter functions for harmony exports
@@ -93627,6 +93639,9 @@ function getOctokit(token, options, ...additionalPlugins) {
 const external_node_fs_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:fs");
 ;// CONCATENATED MODULE: external "node:path"
 const external_node_path_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:path");
+;// CONCATENATED MODULE: external "node:process"
+const external_node_process_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:process");
+var external_node_process_default = /*#__PURE__*/__nccwpck_require__.n(external_node_process_namespaceObject);
 // EXTERNAL MODULE: ./node_modules/@stellar/stellar-sdk/lib/esm/rpc/server.js + 6 modules
 var rpc_server = __nccwpck_require__(9812);
 // EXTERNAL MODULE: ./node_modules/@stellar/stellar-sdk/lib/esm/base/contract.js
@@ -103602,6 +103617,7 @@ function describeRelayError(err) {
 
 
 
+
 /**
  * Orchestrator:
  *   1. Validate inputs + contributor registry (fail loudly on any malformed entry).
@@ -103658,11 +103674,11 @@ async function main() {
     const rpcUrlInput = getInput('rpc_url');
     const cycleIdInput = getInput('cycle_id');
     const sinceInput = getInput('since');
-    const githubToken = process.env.GITHUB_TOKEN;
+    const githubToken = (external_node_process_default()).env.GITHUB_TOKEN;
     if (githubToken === undefined || githubToken === '') {
         throw new ActionError('GITHUB_TOKEN environment variable is required');
     }
-    const oracleSecret = process.env.ORACLE_SECRET_KEY;
+    const oracleSecret = (external_node_process_default()).env.ORACLE_SECRET_KEY;
     if (!dryRun && (oracleSecret === undefined || oracleSecret === '')) {
         throw new ActionError('ORACLE_SECRET_KEY environment variable is required unless dry_run=true');
     }
@@ -103776,7 +103792,7 @@ async function main() {
     }
     const { server, vault, keypair } = relayContext;
     const totalAmount = payouts.entries.reduce((sum, entry) => sum + BigInt(entry.amount), 0n);
-    const feeBumpSecret = process.env.FEE_BUMP_SECRET_KEY;
+    const feeBumpSecret = (external_node_process_default()).env.FEE_BUMP_SECRET_KEY;
     const feeBumpKeypair = feeBumpSecret !== undefined && feeBumpSecret !== '' ? base_keypair/* Keypair */.A.fromSecret(feeBumpSecret) : undefined;
     const relayResult = await relayCycleRoot({
         server,
@@ -103791,7 +103807,7 @@ async function main() {
     });
     info(`relayed merkle root on-chain: tx=${relayResult.hash} status=${relayResult.status} ledger=${relayResult.ledger}`);
     await summary
-        .addHeading('Wave cycle closed on-chain')
+        .addHeading('Cycle closed on-chain')
         .addTable([
         ['cycle', 'tx hash', 'status', 'ledger'],
         [String(cycleId), relayResult.hash, relayResult.status, String(relayResult.ledger)],
@@ -103806,7 +103822,7 @@ async function run() {
     catch (err) {
         const message = describeError(err);
         setFailed(message);
-        process.exitCode = 1;
+        (external_node_process_default()).exitCode = 1;
     }
 }
 void run();
