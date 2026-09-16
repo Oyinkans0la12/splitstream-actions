@@ -35,5 +35,5 @@ Changes to the payout rule fall in the same category: the formula is frozen, and
 splitstream-sdk-cli re-simulates it to verify a cycle, so a rule change needs a
 coordinated change there.
 
-[splitstream-core]: https://github.com/Oyinkans0la12/splitstream-core
-[splitstream-sdk-cli]: https://github.com/Oyinkans0la12/splitstream-sdk-cli
+[splitstream-core]: https://splitstream.gitbook.io/splitstream-core/
+[splitstream-sdk-cli]: https://splitstream.gitbook.io/splitstream-sdk-cli/
