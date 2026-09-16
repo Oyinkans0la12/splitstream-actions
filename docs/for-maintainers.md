@@ -105,9 +105,9 @@ This is a property of the deployment, not of this file. The vault fixes its
 oracle at `initialize()` and exposes no setter, so the account in instance
 storage is the only one `post_cycle_root` will accept; this repo can only report
 a mismatch (it refuses to relay), never resolve one. Changing the vault's oracle
-means changing it on splitstream-core's side first — see that repo's contract
-reference for how the oracle is configured — and updating this registry in the
-same change. This repo has already been burned by getting it wrong once; see the
+means changing it on splitstream-core's side first — see its
+[contract reference][splitstream-core-contract-reference] for how the oracle is
+configured — and updating this registry in the same change. This repo has already been burned by getting it wrong once; see the
 `fix(config)` commit that repointed `oracleAccount` at the deployed vault's
 on-chain oracle. Rotating the keypair follows the same rule: new secret, new
 `oracleAccount`, one change, never a half-applied rotation.
@@ -147,3 +147,5 @@ ruleset requiring a pull request, the push is rejected unless the ruleset exempt
 the workflow's token — exempt it, or change that step to open a PR instead. The
 manifest commit is not optional housekeeping: it is what defines the next
 cycle's window.
+
+[splitstream-core-contract-reference]: https://splitstream.gitbook.io/splitstream-core/contract-reference
