@@ -123,4 +123,4 @@ Two consequences:
 Deleting or rewriting a committed manifest silently rewinds or jumps the next
 cycle's window. Don't.
 
-[splitstream-sdk-cli]: https://github.com/Oyinkans0la12/splitstream-sdk-cli
+[splitstream-sdk-cli]: https://splitstream.gitbook.io/splitstream-sdk-cli/

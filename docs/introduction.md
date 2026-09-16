@@ -34,5 +34,5 @@ either is a breaking change for the other two repos, not an internal refactor.
 - [Contributing](./contributing.md) — where to start, and what breaks other
   repos.
 
-[splitstream-core]: https://github.com/Oyinkans0la12/splitstream-core
-[splitstream-sdk-cli]: https://github.com/Oyinkans0la12/splitstream-sdk-cli
+[splitstream-core]: https://splitstream.gitbook.io/splitstream-core/
+[splitstream-sdk-cli]: https://splitstream.gitbook.io/splitstream-sdk-cli/
