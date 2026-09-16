@@ -124,7 +124,7 @@ It starts with a gate check that fails the run when any of those three is unset.
 Without it, unmet gates mean every test skips and the job reports green having
 verified nothing.
 
-It is separate from `wave-cycle-close.yml` on purpose. That workflow is the real
+It is separate from `cycle-close.yml` on purpose. That workflow is the real
 cycle close: it runs on the sprint boundary, relays to the production vault, and
 cannot be made conditional on a flag, because closing the cycle is the whole
 point of the schedule. The integration check is never scheduled, is read-only

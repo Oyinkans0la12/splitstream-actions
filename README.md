@@ -4,7 +4,7 @@
 
 # SplitStream Actions
 
-**Closes a Wave sprint cycle and puts contributor payouts on-chain — computed from GitHub, relayed to Stellar, in one workflow run.**
+**Closes a contributor sprint cycle and puts contributor payouts on-chain — computed from GitHub, relayed to Stellar, in one workflow run.**
 
 ![CI](https://github.com/Oyinkans0la12/splitstream-actions/actions/workflows/ci.yml/badge.svg)
 ![Node](https://img.shields.io/badge/node-24-green)
@@ -20,11 +20,11 @@ the cycle pool with a frozen integer-only formula, writes the result as a
 distribution manifest committed to the repo as an audit trail, and relays the
 Merkle root of those payouts to the deployed [splitstream-core] contract.
 
-It runs as a GitHub Action on the Wave sprint boundary (weekly schedule) or
+It runs as a GitHub Action on the contributor sprint boundary (weekly schedule) or
 manually. **This repo never holds funds** — it only computes and relays.
 Contributors then claim their share against that root with [splitstream-sdk-cli].
 
-> Org-level settlement: a maintainer's Wave-approved work is often spread across
+> Org-level settlement: an open-source team's approved work is often spread across
 > several repos under the same org (core contracts + app + tooling). SplitStream
 > settles at the org/treasury level — issues closed in **every repo listed in
 > `splitstream.yml`** are summed per contributor before shares are computed.
@@ -62,7 +62,7 @@ Three things must exist in the repo that runs the cycle:
 ```
 
 The working example is this repo's own
-[`.github/workflows/wave-cycle-close.yml`](.github/workflows/wave-cycle-close.yml):
+[`.github/workflows/cycle-close.yml`](.github/workflows/cycle-close.yml):
 weekly `schedule` plus `workflow_dispatch`, with `CYCLE_POOL_AMOUNT` and
 `CYCLE_ID` read from repository variables on the scheduled path. Set
 `CYCLE_POOL_AMOUNT` under Settings → Secrets and variables → Actions → Variables
@@ -182,7 +182,7 @@ account that `ORACLE_SECRET_KEY` signs for.
 
 ## Workflow
 
-[`.github/workflows/wave-cycle-close.yml`](.github/workflows/wave-cycle-close.yml)
+[`.github/workflows/cycle-close.yml`](.github/workflows/cycle-close.yml)
 runs the action weekly (`schedule`) or via `workflow_dispatch`. For schedule runs,
 per-cycle configuration comes from repo variables:
 
@@ -325,8 +325,6 @@ feature idea? [Open an issue](https://github.com/Oyinkans0la12/splitstream-actio
 
 - 💬 **GitHub Issues** — bug reports, feature requests, and design discussion
 - 🔒 **Security** — report vulnerabilities privately per [SECURITY.md](SECURITY.md)
-- 📋 **Wave** — this repo participates in the
-  [Drips Stellar Wave](https://www.drips.network/wave/stellar)
 
 ## Socials
 

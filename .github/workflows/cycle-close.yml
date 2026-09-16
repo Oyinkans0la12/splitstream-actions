@@ -1,8 +1,8 @@
-name: Wave Cycle Close
+name: Cycle Close
 
 on:
   schedule:
-    # Weekly Wave sprint boundary — adjust to your org's sprint day.
+    # Weekly contributor sprint boundary — adjust to your org's sprint day.
     # Monday 00:00 UTC. Per-cycle config comes from repo variables
     # (CYCLE_POOL_AMOUNT, CYCLE_ID for cycle 0); the committed manifests/
     # audit trail supplies the window for every cycle after 0.
@@ -52,7 +52,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Close Wave cycle
+      - name: Close cycle
         id: close
         uses: ./
         with:

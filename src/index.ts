@@ -2,6 +2,7 @@ import * as core from '@actions/core';
 import { getOctokit } from '@actions/github';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import process from 'node:process';
 import { Contract, Keypair, rpc } from '@stellar/stellar-sdk';
 import {
   defaultRpcUrl,
@@ -244,7 +245,7 @@ async function main(): Promise<void> {
     `relayed merkle root on-chain: tx=${relayResult.hash} status=${relayResult.status} ledger=${relayResult.ledger}`,
   );
   await core.summary
-    .addHeading('Wave cycle closed on-chain')
+    .addHeading('Cycle closed on-chain')
     .addTable([
       ['cycle', 'tx hash', 'status', 'ledger'],
       [String(cycleId), relayResult.hash, relayResult.status, String(relayResult.ledger)],
